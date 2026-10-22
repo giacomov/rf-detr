@@ -122,6 +122,16 @@ class TestFromCheckpointNamespaceArgs:
             ("rf-detr-seg-xlarge.pt", "RFDETRSegXLarge"),
             ("rf-detr-seg-xxlarge.pt", "RFDETRSeg2XLarge"),
             ("rf-detr-seg-preview.pt", "RFDETRSegPreview"),
+            ("rf-detr-dinov3-convnext-tiny-lateral.pth", "RFDETRDINOv3ConvNextTinyLateral"),
+            ("rf-detr-dinov3-convnext-tiny-fpn.pth", "RFDETRDINOv3ConvNextTinyFPN"),
+            # "small"/"base" are themselves substrings of these filenames -- regression coverage for the
+            # _CHECKPOINT_MODEL_MAP_ENTRIES ordering that keeps the specific entry matching first.
+            ("rf-detr-dinov3-convnext-small-lateral.pth", "RFDETRDINOv3ConvNextSmallLateral"),
+            ("rf-detr-dinov3-convnext-small-fpn.pth", "RFDETRDINOv3ConvNextSmallFPN"),
+            ("rf-detr-dinov3-convnext-base-lateral.pth", "RFDETRDINOv3ConvNextBaseLateral"),
+            ("rf-detr-dinov3-convnext-base-fpn.pth", "RFDETRDINOv3ConvNextBaseFPN"),
+            ("rf-detr-seg-dinov3-convnext-small-lateral.pt", "RFDETRSegDINOv3ConvNextSmallLateral"),
+            ("rf-detr-seg-dinov3-convnext-base-fpn.pt", "RFDETRSegDINOv3ConvNextBaseFPN"),
         ],
     )
     def test_characterization_infers_correct_class_namespace(

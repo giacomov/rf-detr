@@ -1112,10 +1112,11 @@ class RFDETRDINOv3ConvNextConfig(ModelConfig):
     codebase (e.g. ``RFDETR.predict()``, export, the dataloader collate function) -- this backbone has no ViT
     patch embedding and no windowed attention.
 
-    Concrete leaf configs only need to override ``encoder`` (one of the ``"dinov3_convnext_{size}_lateral"``
-    names registered in ``rfdetr.models.backbone.dinov3_convnext_backbone``) and, for larger sizes, scale
-    ``hidden_dim``/``ca_nheads``/``dec_n_points`` up the way ``RFDETRLargeDeprecatedConfig`` scales up from
-    ``RFDETRBaseConfig``.
+    Concrete leaf configs only need to override ``encoder`` (one of the ``"dinov3_convnext_{size}_{lateral,fpn}"``
+    names registered in ``rfdetr.models.backbone.dinov3_convnext_backbone``). Unlike RF-DETR's DINOv2 Small/
+    Medium/Large tiers, the decoder here is kept identical across ConvNeXt sizes -- Small/Base already carry more
+    backbone capacity (wider/deeper ConvNeXt stages) without widening the decoder too; callers who want a wider
+    decoder for Base can still override ``hidden_dim``/``ca_nheads``/``dec_n_points`` at construction time.
     """
 
     hidden_dim: int = 256
@@ -1141,6 +1142,72 @@ class RFDETRDINOv3ConvNextTinyFPNConfig(RFDETRDINOv3ConvNextConfig):
     """RF-DETR detection, DINOv3-ConvNeXt-Tiny backbone, FPN-style top-down-fusion neck."""
 
     encoder: EncoderName = "dinov3_convnext_tiny_fpn"
+
+
+class RFDETRDINOv3ConvNextSmallLateralConfig(RFDETRDINOv3ConvNextConfig):
+    """RF-DETR detection, DINOv3-ConvNeXt-Small backbone, minimal lateral-projection neck."""
+
+    encoder: EncoderName = "dinov3_convnext_small_lateral"
+
+
+class RFDETRDINOv3ConvNextSmallFPNConfig(RFDETRDINOv3ConvNextConfig):
+    """RF-DETR detection, DINOv3-ConvNeXt-Small backbone, FPN-style top-down-fusion neck."""
+
+    encoder: EncoderName = "dinov3_convnext_small_fpn"
+
+
+class RFDETRDINOv3ConvNextBaseLateralConfig(RFDETRDINOv3ConvNextConfig):
+    """RF-DETR detection, DINOv3-ConvNeXt-Base backbone, minimal lateral-projection neck."""
+
+    encoder: EncoderName = "dinov3_convnext_base_lateral"
+
+
+class RFDETRDINOv3ConvNextBaseFPNConfig(RFDETRDINOv3ConvNextConfig):
+    """RF-DETR detection, DINOv3-ConvNeXt-Base backbone, FPN-style top-down-fusion neck."""
+
+    encoder: EncoderName = "dinov3_convnext_base_fpn"
+
+
+class RFDETRSegDINOv3ConvNextConfig(RFDETRDINOv3ConvNextConfig):
+    """Shared fields for every DINOv3-ConvNeXt segmentation config (see ``RFDETRDINOv3ConvNextConfig``)."""
+
+    segmentation_head: bool = True
+
+
+class RFDETRSegDINOv3ConvNextTinyLateralConfig(RFDETRSegDINOv3ConvNextConfig):
+    """RF-DETR segmentation, DINOv3-ConvNeXt-Tiny backbone, minimal lateral-projection neck."""
+
+    encoder: EncoderName = "dinov3_convnext_tiny_lateral"
+
+
+class RFDETRSegDINOv3ConvNextTinyFPNConfig(RFDETRSegDINOv3ConvNextConfig):
+    """RF-DETR segmentation, DINOv3-ConvNeXt-Tiny backbone, FPN-style top-down-fusion neck."""
+
+    encoder: EncoderName = "dinov3_convnext_tiny_fpn"
+
+
+class RFDETRSegDINOv3ConvNextSmallLateralConfig(RFDETRSegDINOv3ConvNextConfig):
+    """RF-DETR segmentation, DINOv3-ConvNeXt-Small backbone, minimal lateral-projection neck."""
+
+    encoder: EncoderName = "dinov3_convnext_small_lateral"
+
+
+class RFDETRSegDINOv3ConvNextSmallFPNConfig(RFDETRSegDINOv3ConvNextConfig):
+    """RF-DETR segmentation, DINOv3-ConvNeXt-Small backbone, FPN-style top-down-fusion neck."""
+
+    encoder: EncoderName = "dinov3_convnext_small_fpn"
+
+
+class RFDETRSegDINOv3ConvNextBaseLateralConfig(RFDETRSegDINOv3ConvNextConfig):
+    """RF-DETR segmentation, DINOv3-ConvNeXt-Base backbone, minimal lateral-projection neck."""
+
+    encoder: EncoderName = "dinov3_convnext_base_lateral"
+
+
+class RFDETRSegDINOv3ConvNextBaseFPNConfig(RFDETRSegDINOv3ConvNextConfig):
+    """RF-DETR segmentation, DINOv3-ConvNeXt-Base backbone, FPN-style top-down-fusion neck."""
+
+    encoder: EncoderName = "dinov3_convnext_base_fpn"
 
 
 class RFDETRSegPreviewConfig(RFDETRBaseConfig):

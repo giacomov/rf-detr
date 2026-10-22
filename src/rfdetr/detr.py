@@ -362,6 +362,10 @@ def _mps_lacks_antialiased_resize() -> bool:
 # ModelContext and _build_model_context are eagerly imported above (runtime use in get_model).
 _VARIANT_EXPORTS = (
     "RFDETRBase",
+    "RFDETRDINOv3ConvNextBaseFPN",
+    "RFDETRDINOv3ConvNextBaseLateral",
+    "RFDETRDINOv3ConvNextSmallFPN",
+    "RFDETRDINOv3ConvNextSmallLateral",
     "RFDETRDINOv3ConvNextTinyFPN",
     "RFDETRDINOv3ConvNextTinyLateral",
     "RFDETRKeypointPreview",
@@ -371,6 +375,12 @@ _VARIANT_EXPORTS = (
     "RFDETRNano",
     "RFDETRSeg",
     "RFDETRSeg2XLarge",
+    "RFDETRSegDINOv3ConvNextBaseFPN",
+    "RFDETRSegDINOv3ConvNextBaseLateral",
+    "RFDETRSegDINOv3ConvNextSmallFPN",
+    "RFDETRSegDINOv3ConvNextSmallLateral",
+    "RFDETRSegDINOv3ConvNextTinyFPN",
+    "RFDETRSegDINOv3ConvNextTinyLateral",
     "RFDETRSegLarge",
     "RFDETRSegMedium",
     "RFDETRSegNano",
@@ -395,13 +405,26 @@ _CHECKPOINT_MODEL_MAP_ENTRIES: tuple[tuple[str, str], ...] = (
     ("seg-small", "RFDETRSegSmall"),
     ("seg-nano", "RFDETRSegNano"),
     ("seg-preview", "RFDETRSegPreview"),
+    ("seg-dinov3-convnext-tiny-lateral", "RFDETRSegDINOv3ConvNextTinyLateral"),
+    ("seg-dinov3-convnext-tiny-fpn", "RFDETRSegDINOv3ConvNextTinyFPN"),
+    ("seg-dinov3-convnext-small-lateral", "RFDETRSegDINOv3ConvNextSmallLateral"),
+    ("seg-dinov3-convnext-small-fpn", "RFDETRSegDINOv3ConvNextSmallFPN"),
+    ("seg-dinov3-convnext-base-lateral", "RFDETRSegDINOv3ConvNextBaseLateral"),
+    ("seg-dinov3-convnext-base-fpn", "RFDETRSegDINOv3ConvNextBaseFPN"),
+    # These dinov3-convnext-* entries must stay ahead of the bare "small"/"base" entries below: "small" and
+    # "base" are themselves substrings of e.g. "dinov3-convnext-small-lateral"/"dinov3-convnext-base-fpn", and
+    # resolution below picks the first matching entry in iteration order.
+    ("dinov3-convnext-tiny-lateral", "RFDETRDINOv3ConvNextTinyLateral"),
+    ("dinov3-convnext-tiny-fpn", "RFDETRDINOv3ConvNextTinyFPN"),
+    ("dinov3-convnext-small-lateral", "RFDETRDINOv3ConvNextSmallLateral"),
+    ("dinov3-convnext-small-fpn", "RFDETRDINOv3ConvNextSmallFPN"),
+    ("dinov3-convnext-base-lateral", "RFDETRDINOv3ConvNextBaseLateral"),
+    ("dinov3-convnext-base-fpn", "RFDETRDINOv3ConvNextBaseFPN"),
     ("large", "RFDETRLarge"),
     ("medium", "RFDETRMedium"),
     ("small", "RFDETRSmall"),
     ("nano", "RFDETRNano"),
     ("base", "RFDETRBase"),
-    ("dinov3-convnext-tiny-lateral", "RFDETRDINOv3ConvNextTinyLateral"),
-    ("dinov3-convnext-tiny-fpn", "RFDETRDINOv3ConvNextTinyFPN"),
 )
 _CHECKPOINT_PLUS_MODEL_MAP_ENTRIES: tuple[tuple[str, str], ...] = (
     ("2xlarge", "RFDETR2XLarge"),

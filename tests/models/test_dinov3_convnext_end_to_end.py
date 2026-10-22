@@ -21,8 +21,18 @@ import torch
 
 from rfdetr.config import (
     ModelConfig,
+    RFDETRDINOv3ConvNextBaseFPNConfig,
+    RFDETRDINOv3ConvNextBaseLateralConfig,
+    RFDETRDINOv3ConvNextSmallFPNConfig,
+    RFDETRDINOv3ConvNextSmallLateralConfig,
     RFDETRDINOv3ConvNextTinyFPNConfig,
     RFDETRDINOv3ConvNextTinyLateralConfig,
+    RFDETRSegDINOv3ConvNextBaseFPNConfig,
+    RFDETRSegDINOv3ConvNextBaseLateralConfig,
+    RFDETRSegDINOv3ConvNextSmallFPNConfig,
+    RFDETRSegDINOv3ConvNextSmallLateralConfig,
+    RFDETRSegDINOv3ConvNextTinyFPNConfig,
+    RFDETRSegDINOv3ConvNextTinyLateralConfig,
     TrainConfig,
 )
 from rfdetr.models import MODEL_DEFAULTS, build_criterion_from_config, build_model_from_config
@@ -127,3 +137,59 @@ class TestDINOv3ConvNextEndToEnd:
             assert torch.isfinite(loss)
             loss.backward()
             optimizer.step()
+
+
+#: All 3 sizes x 2 necks, for both detection and segmentation configs -- the full matrix this backbone supports.
+_ALL_DETECTION_CONFIGS = [
+    pytest.param(RFDETRDINOv3ConvNextTinyLateralConfig, id="tiny-lateral"),
+    pytest.param(RFDETRDINOv3ConvNextTinyFPNConfig, id="tiny-fpn"),
+    pytest.param(RFDETRDINOv3ConvNextSmallLateralConfig, id="small-lateral"),
+    pytest.param(RFDETRDINOv3ConvNextSmallFPNConfig, id="small-fpn"),
+    pytest.param(RFDETRDINOv3ConvNextBaseLateralConfig, id="base-lateral"),
+    pytest.param(RFDETRDINOv3ConvNextBaseFPNConfig, id="base-fpn"),
+]
+_ALL_SEGMENTATION_CONFIGS = [
+    pytest.param(RFDETRSegDINOv3ConvNextTinyLateralConfig, id="seg-tiny-lateral"),
+    pytest.param(RFDETRSegDINOv3ConvNextTinyFPNConfig, id="seg-tiny-fpn"),
+    pytest.param(RFDETRSegDINOv3ConvNextSmallLateralConfig, id="seg-small-lateral"),
+    pytest.param(RFDETRSegDINOv3ConvNextSmallFPNConfig, id="seg-small-fpn"),
+    pytest.param(RFDETRSegDINOv3ConvNextBaseLateralConfig, id="seg-base-lateral"),
+    pytest.param(RFDETRSegDINOv3ConvNextBaseFPNConfig, id="seg-base-fpn"),
+]
+
+
+class TestAllSizesAndTasksSmoke:
+    """Shape-only smoke coverage for the full 3-size x 2-neck x {detection, segmentation} matrix.
+
+    The heavier forward+backward+gradient checks above already prove the chain is wired correctly for Tiny;
+    this proves the same config pattern (only ``encoder``/``segmentation_head`` differ) builds and runs for every
+    other size, without paying for a full backward pass x 12 combinations.
+    """
+
+    @pytest.mark.parametrize("config_class", _ALL_DETECTION_CONFIGS)
+    def test_detection_config_builds_and_runs(self, config_class: type[ModelConfig]) -> None:
+        mc = config_class(resolution=128, num_classes=3)
+        model = build_model_from_config(mc, defaults=_NO_PRETRAIN)
+        model.eval()
+        images = torch.randn(1, 3, 128, 128)
+
+        with torch.no_grad():
+            outputs = model(images)
+
+        assert outputs["pred_logits"].shape == (1, mc.num_queries, 4)
+        assert outputs["pred_boxes"].shape == (1, mc.num_queries, 4)
+
+    @pytest.mark.parametrize("config_class", _ALL_SEGMENTATION_CONFIGS)
+    def test_segmentation_config_builds_and_runs(self, config_class: type[ModelConfig]) -> None:
+        mc = config_class(resolution=128, num_classes=3)
+        model = build_model_from_config(mc, defaults=_NO_PRETRAIN)
+        assert model.segmentation_head is not None
+        model.eval()
+        images = torch.randn(1, 3, 128, 128)
+
+        with torch.no_grad():
+            outputs = model(images)
+
+        assert outputs["pred_logits"].shape == (1, mc.num_queries, 4)
+        assert outputs["pred_boxes"].shape == (1, mc.num_queries, 4)
+        assert "pred_masks" in outputs
