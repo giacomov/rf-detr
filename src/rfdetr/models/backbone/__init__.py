@@ -161,3 +161,13 @@ def build_backbone(
 
     model = Joiner(backbone, position_embedding_module)
     return model
+
+
+# Registers the in-core "dinov3_convnext_*" encoder names onto `_BACKBONE_REGISTRY` as an import side effect, the
+# same way an external package would via `register_backbone` (see dinov3_convnext_backbone's module docstring for
+# why it populates the registry directly instead of calling that guarded function). Importing here -- rather than
+# from config.py/variants.py -- guarantees registration happens for every path that reaches `build_backbone`,
+# including direct test calls that never import rfdetr.variants. `_BACKBONE_REGISTRY` is already defined above by
+# the time this runs, so the self-referential `from rfdetr.models.backbone import _BACKBONE_REGISTRY` inside that
+# module resolves against this (still-initializing) package correctly.
+from rfdetr.models.backbone import dinov3_convnext_backbone as _dinov3_convnext_backbone  # noqa: E402,F401

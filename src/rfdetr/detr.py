@@ -362,6 +362,7 @@ def _mps_lacks_antialiased_resize() -> bool:
 # ModelContext and _build_model_context are eagerly imported above (runtime use in get_model).
 _VARIANT_EXPORTS = (
     "RFDETRBase",
+    "RFDETRDINOv3ConvNextTinyLateral",
     "RFDETRKeypointPreview",
     "RFDETRLarge",
     "RFDETRLargeDeprecated",
@@ -398,6 +399,7 @@ _CHECKPOINT_MODEL_MAP_ENTRIES: tuple[tuple[str, str], ...] = (
     ("small", "RFDETRSmall"),
     ("nano", "RFDETRNano"),
     ("base", "RFDETRBase"),
+    ("dinov3-convnext-tiny-lateral", "RFDETRDINOv3ConvNextTinyLateral"),
 )
 _CHECKPOINT_PLUS_MODEL_MAP_ENTRIES: tuple[tuple[str, str], ...] = (
     ("2xlarge", "RFDETR2XLarge"),

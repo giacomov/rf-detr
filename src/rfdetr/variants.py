@@ -20,6 +20,7 @@ __all__ = [
     "RFDETRMedium",
     "RFDETRLarge",
     "RFDETRLargeDeprecated",
+    "RFDETRDINOv3ConvNextTinyLateral",
     "RFDETRSeg",
     "RFDETRSegPreview",
     "RFDETRSegNano",
@@ -38,6 +39,7 @@ from rfdetr.config import (
     KeypointTrainConfig,
     ModelConfig,
     RFDETRBaseConfig,
+    RFDETRDINOv3ConvNextTinyLateralConfig,
     RFDETRKeypointPreviewConfig,
     RFDETRLargeConfig,
     RFDETRLargeDeprecatedConfig,
@@ -145,6 +147,18 @@ class RFDETRLarge(RFDETR):
 
     def get_model_config(self, **kwargs: Any) -> ModelConfig:
         return RFDETRLargeConfig(**kwargs)
+
+
+class RFDETRDINOv3ConvNextTinyLateral(RFDETR):
+    """Train an RF-DETR model with a DINOv3-ConvNeXt-Tiny backbone and a minimal lateral-projection neck.
+
+    Unlike the DINOv2 variants above, this backbone's stage2/3/4 outputs are already a real multi-resolution
+    pyramid (strides 8/16/32), so the neck only projects channel counts -- no resampling across levels. See
+    :mod:`rfdetr.models.backbone.dinov3_convnext_backbone`.
+    """
+
+    size = "rfdetr-dinov3-convnext-tiny-lateral"
+    _model_config_class = RFDETRDINOv3ConvNextTinyLateralConfig
 
 
 class RFDETRSeg(RFDETR):
