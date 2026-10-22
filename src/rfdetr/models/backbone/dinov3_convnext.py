@@ -29,10 +29,11 @@ logger = get_logger()
 #:
 #: NOTE: confirmed against this repo's pinned ``transformers`` version for the Tiny/default preset only
 #: (``DINOv3ConvNextConfig()`` with no args returns exactly these Tiny values). Small/Base are the canonical
-#: ConvNeXt-paper numbers and very likely what ``DINOv3ConvNextConfig``'s own per-size presets use, but were not
-#: independently verified against the HF source for this project. Confirm against
-#: ``transformers.models.dinov3_convnext`` source or each model's ``config.json`` before relying on them for a
-#: real pretrained-weight load -- if they differ, only this one dict needs updating.
+#: ConvNeXt-paper numbers and very likely what ``DINOv3ConvNextConfig``'s own per-size presets use, but could not
+#: be independently verified for this project: the Hub repos are gated even for reading ``config.json`` (a
+#: logged-out ``AutoConfig.from_pretrained`` returns a 401 for every size, confirmed this session), so there is
+#: no way to check them without access. Confirm against the real ``config.json`` once access is granted, before
+#: relying on these for a real pretrained-weight load -- if they differ, only this one dict needs updating.
 SIZE_TO_HIDDEN_SIZES: dict[str, list[int]] = {
     "tiny": [96, 192, 384, 768],
     "small": [96, 192, 384, 768],
@@ -44,10 +45,10 @@ SIZE_TO_DEPTHS: dict[str, list[int]] = {
     "base": [3, 3, 27, 3],
 }
 
-#: Hugging Face Hub repo id for each size's DINOv3-ConvNeXt pretrained checkpoint. These are gated repos:
-#: downloading requires requesting/accepting access on the model page, then authenticating with
-#: ``huggingface-cli login`` or the ``HF_TOKEN`` environment variable. Only the Tiny id was confirmed reachable
-#: this session; Small/Base follow the same naming convention but were not independently verified.
+#: Hugging Face Hub repo id for each size's DINOv3-ConvNeXt pretrained checkpoint. All three are confirmed gated
+#: (a logged-out ``AutoConfig.from_pretrained`` against each repo returns a 401 "You are trying to access a gated
+#: repo" error, even for the config alone, not just the weights): downloading requires requesting/accepting access
+#: on the model page, then authenticating with ``huggingface-cli login`` or the ``HF_TOKEN`` environment variable.
 SIZE_TO_HUB_ID: dict[str, str] = {
     "tiny": "facebook/dinov3-convnext-tiny-pretrain-lvd1689m",
     "small": "facebook/dinov3-convnext-small-pretrain-lvd1689m",

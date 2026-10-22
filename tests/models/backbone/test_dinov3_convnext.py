@@ -121,3 +121,33 @@ class TestLoadPretrainedConvNextBackbone:
 
         assert "huggingface-cli login" in str(excinfo.value)
         assert isinstance(excinfo.value.__cause__, OSError)
+
+
+@pytest.mark.integration
+class TestRealPretrainedWeights:
+    """Opt-in, network-dependent: attempts a real download for each size, skipping cleanly when the (gated) Hub
+    repo hasn't been granted to the authenticated user or there is no network access -- mirrors
+    ``tests/conftest.py``'s ``_prewarm_dinov2_cache`` try/except + ``pytest.skip`` pattern for the same reason.
+    """
+
+    @pytest.mark.parametrize("size", ["tiny", "small", "base"])
+    def test_real_weights_load_and_produce_non_random_features(self, size: str) -> None:
+        from rfdetr.models.backbone.dinov3_convnext import SIZE_TO_HUB_ID
+
+        try:
+            encoder = DINOv3ConvNext(size=size, out_feature_indexes=[4], load_pretrained_weights=True)
+        except RuntimeError as exc:
+            pytest.skip(f"Gated/network access unavailable for {SIZE_TO_HUB_ID[size]}: {exc}")
+
+        # A random-init DINOv3ConvNextBackbone of the same shape, to contrast against: if the download above
+        # silently fell back to random weights for any reason, this comparison would wrongly pass too -- so this
+        # doesn't prove correctness, only that *something* other than fresh random init was loaded.
+        random_encoder = DINOv3ConvNext(size=size, out_feature_indexes=[4], load_pretrained_weights=False)
+
+        images = torch.randn(1, 3, 224, 224)
+        with torch.no_grad():
+            pretrained_feat = encoder(images)[0]
+            random_feat = random_encoder(images)[0]
+
+        assert pretrained_feat.shape == random_feat.shape
+        assert not torch.allclose(pretrained_feat, random_feat)
