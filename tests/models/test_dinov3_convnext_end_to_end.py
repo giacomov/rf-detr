@@ -1,0 +1,195 @@
+# ------------------------------------------------------------------------
+# RF-DETR
+# Copyright (c) 2025 Roboflow. All Rights Reserved.
+# Licensed under the Apache License, Version 2.0 [see LICENSE for details]
+# ------------------------------------------------------------------------
+"""End-to-end, network-free test of the DINOv3-ConvNeXt backbone through the real deformable
+transformer/decoder, with a real (random-init) forward + backward pass.
+
+This also doubles as the first real exerciser of a genuine 3-level ``projector_scale=["P3","P4","P5"]`` forward
+pass anywhere in the test suite: every shipped DINOv2 config uses only 1-2 levels, and the only existing 3-level
+coverage (``tests/export/test_prepare.py``) only exercises output naming against a stub, never a real forward
+pass through the transformer.
+"""
+
+from __future__ import annotations
+
+from dataclasses import replace
+
+import pytest
+import torch
+
+from rfdetr.config import (
+    ModelConfig,
+    RFDETRDINOv3ConvNextBaseFPNConfig,
+    RFDETRDINOv3ConvNextBaseLateralConfig,
+    RFDETRDINOv3ConvNextSmallFPNConfig,
+    RFDETRDINOv3ConvNextSmallLateralConfig,
+    RFDETRDINOv3ConvNextTinyFPNConfig,
+    RFDETRDINOv3ConvNextTinyLateralConfig,
+    RFDETRSegDINOv3ConvNextBaseFPNConfig,
+    RFDETRSegDINOv3ConvNextBaseLateralConfig,
+    RFDETRSegDINOv3ConvNextSmallFPNConfig,
+    RFDETRSegDINOv3ConvNextSmallLateralConfig,
+    RFDETRSegDINOv3ConvNextTinyFPNConfig,
+    RFDETRSegDINOv3ConvNextTinyLateralConfig,
+    TrainConfig,
+)
+from rfdetr.models import MODEL_DEFAULTS, build_criterion_from_config, build_model_from_config
+from rfdetr.models.lwdetr import LWDETR
+
+#: `pretrain_weights=None` (no trained RF-DETR checkpoint exists for this backbone yet) would otherwise make
+#: `build_model_from_config` try to download the (gated) upstream DINOv3-ConvNeXt weights -- force random init so
+#: these tests run offline, with no network/Hub-auth dependency.
+_NO_PRETRAIN = replace(MODEL_DEFAULTS, force_no_pretrain=True)
+_TRAIN_CONFIG = TrainConfig(dataset_dir=".", output_dir=".")
+
+
+def _tiny_targets(batch_size: int, num_classes: int) -> list[dict[str, torch.Tensor]]:
+    return [
+        {
+            "labels": torch.randint(0, num_classes, (2,), dtype=torch.int64),
+            "boxes": torch.rand(2, 4).clamp(0.05, 0.95),
+        }
+        for _ in range(batch_size)
+    ]
+
+
+#: Both neck kinds, parametrizing the tests that exercise the full chain so FPNNeck gets the same real
+#: forward/backward coverage as LateralNeck, without duplicating every test in this file.
+_NECK_CONFIGS = [
+    pytest.param(RFDETRDINOv3ConvNextTinyLateralConfig, id="lateral"),
+    pytest.param(RFDETRDINOv3ConvNextTinyFPNConfig, id="fpn"),
+]
+
+
+class TestDINOv3ConvNextEndToEnd:
+    @pytest.mark.parametrize("config_class", _NECK_CONFIGS)
+    def test_builds_a_real_lwdetr_model(self, config_class: type[ModelConfig]) -> None:
+        mc = config_class(resolution=128, num_classes=3)
+
+        model = build_model_from_config(mc, defaults=_NO_PRETRAIN)
+
+        assert isinstance(model, LWDETR)
+        assert model.class_embed.out_features == 4  # num_classes + background
+
+    def test_forward_pass_produces_expected_shapes(self) -> None:
+        mc = RFDETRDINOv3ConvNextTinyLateralConfig(resolution=128, num_classes=3)
+        model = build_model_from_config(mc, defaults=_NO_PRETRAIN)
+        model.eval()
+        images = torch.randn(2, 3, 128, 128)
+
+        with torch.no_grad():
+            outputs = model(images)
+
+        assert outputs["pred_logits"].shape == (2, mc.num_queries, 4)
+        assert outputs["pred_boxes"].shape == (2, mc.num_queries, 4)
+
+    @pytest.mark.parametrize("config_class", _NECK_CONFIGS)
+    def test_forward_backward_through_real_decoder_with_3_levels(self, config_class: type[ModelConfig]) -> None:
+        """Exercises the genuine ``projector_scale=["P3","P4","P5"]`` path end-to-end: real backbone, real
+        neck (lateral or FPN), real deformable transformer/decoder, real criterion, real backward pass."""
+        mc = config_class(resolution=128, num_classes=3)
+        model = build_model_from_config(mc, defaults=_NO_PRETRAIN)
+        criterion, _postprocess = build_criterion_from_config(mc, _TRAIN_CONFIG, defaults=_NO_PRETRAIN)
+        model.train()
+
+        images = torch.randn(2, 3, 128, 128)
+        targets = _tiny_targets(batch_size=2, num_classes=3)
+
+        outputs = model(images, targets)
+        loss_dict = criterion(outputs, targets)
+        weight_dict = criterion.weight_dict
+        loss = sum(loss_dict[k] * weight_dict[k] for k in loss_dict if k in weight_dict)
+
+        assert torch.isfinite(loss)
+        loss.backward()
+
+        # Gradients must reach both the ConvNeXt encoder and the neck -- confirms the whole chain
+        # (backbone -> neck -> transformer -> decoder -> criterion) is actually connected, not just shape-correct.
+        backbone = model.backbone[0]
+        encoder_grad_norms = [p.grad.norm().item() for p in backbone.encoder.parameters() if p.grad is not None]
+        neck_grad_norms = [p.grad.norm().item() for p in backbone.projector.parameters() if p.grad is not None]
+
+        assert encoder_grad_norms, "No gradients reached the DINOv3-ConvNeXt encoder."
+        assert any(g > 0 for g in encoder_grad_norms)
+        assert neck_grad_norms, "No gradients reached the neck."
+        assert any(g > 0 for g in neck_grad_norms)
+
+    def test_one_optimizer_step_keeps_loss_finite(self) -> None:
+        """A tiny synthetic training step: one forward + backward + optimizer.step(), finite loss throughout."""
+        mc = RFDETRDINOv3ConvNextTinyLateralConfig(resolution=128, num_classes=3)
+        model = build_model_from_config(mc, defaults=_NO_PRETRAIN)
+        criterion, _postprocess = build_criterion_from_config(mc, _TRAIN_CONFIG, defaults=_NO_PRETRAIN)
+        model.train()
+        optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+
+        for _ in range(2):
+            images = torch.randn(2, 3, 128, 128)
+            targets = _tiny_targets(batch_size=2, num_classes=3)
+
+            optimizer.zero_grad()
+            outputs = model(images, targets)
+            loss_dict = criterion(outputs, targets)
+            weight_dict = criterion.weight_dict
+            loss = sum(loss_dict[k] * weight_dict[k] for k in loss_dict if k in weight_dict)
+
+            assert torch.isfinite(loss)
+            loss.backward()
+            optimizer.step()
+
+
+#: All 3 sizes x 2 necks, for both detection and segmentation configs -- the full matrix this backbone supports.
+_ALL_DETECTION_CONFIGS = [
+    pytest.param(RFDETRDINOv3ConvNextTinyLateralConfig, id="tiny-lateral"),
+    pytest.param(RFDETRDINOv3ConvNextTinyFPNConfig, id="tiny-fpn"),
+    pytest.param(RFDETRDINOv3ConvNextSmallLateralConfig, id="small-lateral"),
+    pytest.param(RFDETRDINOv3ConvNextSmallFPNConfig, id="small-fpn"),
+    pytest.param(RFDETRDINOv3ConvNextBaseLateralConfig, id="base-lateral"),
+    pytest.param(RFDETRDINOv3ConvNextBaseFPNConfig, id="base-fpn"),
+]
+_ALL_SEGMENTATION_CONFIGS = [
+    pytest.param(RFDETRSegDINOv3ConvNextTinyLateralConfig, id="seg-tiny-lateral"),
+    pytest.param(RFDETRSegDINOv3ConvNextTinyFPNConfig, id="seg-tiny-fpn"),
+    pytest.param(RFDETRSegDINOv3ConvNextSmallLateralConfig, id="seg-small-lateral"),
+    pytest.param(RFDETRSegDINOv3ConvNextSmallFPNConfig, id="seg-small-fpn"),
+    pytest.param(RFDETRSegDINOv3ConvNextBaseLateralConfig, id="seg-base-lateral"),
+    pytest.param(RFDETRSegDINOv3ConvNextBaseFPNConfig, id="seg-base-fpn"),
+]
+
+
+class TestAllSizesAndTasksSmoke:
+    """Shape-only smoke coverage for the full 3-size x 2-neck x {detection, segmentation} matrix.
+
+    The heavier forward+backward+gradient checks above already prove the chain is wired correctly for Tiny;
+    this proves the same config pattern (only ``encoder``/``segmentation_head`` differ) builds and runs for every
+    other size, without paying for a full backward pass x 12 combinations.
+    """
+
+    @pytest.mark.parametrize("config_class", _ALL_DETECTION_CONFIGS)
+    def test_detection_config_builds_and_runs(self, config_class: type[ModelConfig]) -> None:
+        mc = config_class(resolution=128, num_classes=3)
+        model = build_model_from_config(mc, defaults=_NO_PRETRAIN)
+        model.eval()
+        images = torch.randn(1, 3, 128, 128)
+
+        with torch.no_grad():
+            outputs = model(images)
+
+        assert outputs["pred_logits"].shape == (1, mc.num_queries, 4)
+        assert outputs["pred_boxes"].shape == (1, mc.num_queries, 4)
+
+    @pytest.mark.parametrize("config_class", _ALL_SEGMENTATION_CONFIGS)
+    def test_segmentation_config_builds_and_runs(self, config_class: type[ModelConfig]) -> None:
+        mc = config_class(resolution=128, num_classes=3)
+        model = build_model_from_config(mc, defaults=_NO_PRETRAIN)
+        assert model.segmentation_head is not None
+        model.eval()
+        images = torch.randn(1, 3, 128, 128)
+
+        with torch.no_grad():
+            outputs = model(images)
+
+        assert outputs["pred_logits"].shape == (1, mc.num_queries, 4)
+        assert outputs["pred_boxes"].shape == (1, mc.num_queries, 4)
+        assert "pred_masks" in outputs

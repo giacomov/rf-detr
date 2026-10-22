@@ -20,6 +20,12 @@ __all__ = [
     "RFDETRMedium",
     "RFDETRLarge",
     "RFDETRLargeDeprecated",
+    "RFDETRDINOv3ConvNextTinyLateral",
+    "RFDETRDINOv3ConvNextTinyFPN",
+    "RFDETRDINOv3ConvNextSmallLateral",
+    "RFDETRDINOv3ConvNextSmallFPN",
+    "RFDETRDINOv3ConvNextBaseLateral",
+    "RFDETRDINOv3ConvNextBaseFPN",
     "RFDETRSeg",
     "RFDETRSegPreview",
     "RFDETRSegNano",
@@ -28,6 +34,12 @@ __all__ = [
     "RFDETRSegLarge",
     "RFDETRSegXLarge",
     "RFDETRSeg2XLarge",
+    "RFDETRSegDINOv3ConvNextTinyLateral",
+    "RFDETRSegDINOv3ConvNextTinyFPN",
+    "RFDETRSegDINOv3ConvNextSmallLateral",
+    "RFDETRSegDINOv3ConvNextSmallFPN",
+    "RFDETRSegDINOv3ConvNextBaseLateral",
+    "RFDETRSegDINOv3ConvNextBaseFPN",
 ]
 
 from typing import Any
@@ -38,12 +50,24 @@ from rfdetr.config import (
     KeypointTrainConfig,
     ModelConfig,
     RFDETRBaseConfig,
+    RFDETRDINOv3ConvNextBaseFPNConfig,
+    RFDETRDINOv3ConvNextBaseLateralConfig,
+    RFDETRDINOv3ConvNextSmallFPNConfig,
+    RFDETRDINOv3ConvNextSmallLateralConfig,
+    RFDETRDINOv3ConvNextTinyFPNConfig,
+    RFDETRDINOv3ConvNextTinyLateralConfig,
     RFDETRKeypointPreviewConfig,
     RFDETRLargeConfig,
     RFDETRLargeDeprecatedConfig,
     RFDETRMediumConfig,
     RFDETRNanoConfig,
     RFDETRSeg2XLargeConfig,
+    RFDETRSegDINOv3ConvNextBaseFPNConfig,
+    RFDETRSegDINOv3ConvNextBaseLateralConfig,
+    RFDETRSegDINOv3ConvNextSmallFPNConfig,
+    RFDETRSegDINOv3ConvNextSmallLateralConfig,
+    RFDETRSegDINOv3ConvNextTinyFPNConfig,
+    RFDETRSegDINOv3ConvNextTinyLateralConfig,
     RFDETRSegLargeConfig,
     RFDETRSegMediumConfig,
     RFDETRSegNanoConfig,
@@ -147,6 +171,58 @@ class RFDETRLarge(RFDETR):
         return RFDETRLargeConfig(**kwargs)
 
 
+class RFDETRDINOv3ConvNextTinyLateral(RFDETR):
+    """Train an RF-DETR model with a DINOv3-ConvNeXt-Tiny backbone and a minimal lateral-projection neck.
+
+    Unlike the DINOv2 variants above, this backbone's stage2/3/4 outputs are already a real multi-resolution
+    pyramid (strides 8/16/32), so the neck only projects channel counts -- no resampling across levels. See
+    :mod:`rfdetr.models.backbone.dinov3_convnext_backbone`.
+    """
+
+    size = "rfdetr-dinov3-convnext-tiny-lateral"
+    _model_config_class = RFDETRDINOv3ConvNextTinyLateralConfig
+
+
+class RFDETRDINOv3ConvNextTinyFPN(RFDETR):
+    """Train an RF-DETR model with a DINOv3-ConvNeXt-Tiny backbone and an FPN-style top-down-fusion neck.
+
+    Unlike :class:`RFDETRDINOv3ConvNextTinyLateral`, every output level here mixes information from every
+    coarser level via classic top-down upsample-and-add fusion. See
+    :mod:`rfdetr.models.backbone.dinov3_convnext_neck`.
+    """
+
+    size = "rfdetr-dinov3-convnext-tiny-fpn"
+    _model_config_class = RFDETRDINOv3ConvNextTinyFPNConfig
+
+
+class RFDETRDINOv3ConvNextSmallLateral(RFDETR):
+    """Train an RF-DETR model with a DINOv3-ConvNeXt-Small backbone and a minimal lateral-projection neck."""
+
+    size = "rfdetr-dinov3-convnext-small-lateral"
+    _model_config_class = RFDETRDINOv3ConvNextSmallLateralConfig
+
+
+class RFDETRDINOv3ConvNextSmallFPN(RFDETR):
+    """Train an RF-DETR model with a DINOv3-ConvNeXt-Small backbone and an FPN-style top-down-fusion neck."""
+
+    size = "rfdetr-dinov3-convnext-small-fpn"
+    _model_config_class = RFDETRDINOv3ConvNextSmallFPNConfig
+
+
+class RFDETRDINOv3ConvNextBaseLateral(RFDETR):
+    """Train an RF-DETR model with a DINOv3-ConvNeXt-Base backbone and a minimal lateral-projection neck."""
+
+    size = "rfdetr-dinov3-convnext-base-lateral"
+    _model_config_class = RFDETRDINOv3ConvNextBaseLateralConfig
+
+
+class RFDETRDINOv3ConvNextBaseFPN(RFDETR):
+    """Train an RF-DETR model with a DINOv3-ConvNeXt-Base backbone and an FPN-style top-down-fusion neck."""
+
+    size = "rfdetr-dinov3-convnext-base-fpn"
+    _model_config_class = RFDETRDINOv3ConvNextBaseFPNConfig
+
+
 class RFDETRSeg(RFDETR):
     """Base class for all RF-DETR segmentation models.
 
@@ -238,3 +314,45 @@ class RFDETRSeg2XLarge(RFDETRSeg):
 
     size = "rfdetr-seg-2xlarge"
     _model_config_class = RFDETRSeg2XLargeConfig
+
+
+class RFDETRSegDINOv3ConvNextTinyLateral(RFDETRSeg):
+    """Train an RF-DETR segmentation model with a DINOv3-ConvNeXt-Tiny backbone and a lateral-projection neck."""
+
+    size = "rfdetr-seg-dinov3-convnext-tiny-lateral"
+    _model_config_class = RFDETRSegDINOv3ConvNextTinyLateralConfig
+
+
+class RFDETRSegDINOv3ConvNextTinyFPN(RFDETRSeg):
+    """Train an RF-DETR segmentation model with a DINOv3-ConvNeXt-Tiny backbone and an FPN-style neck."""
+
+    size = "rfdetr-seg-dinov3-convnext-tiny-fpn"
+    _model_config_class = RFDETRSegDINOv3ConvNextTinyFPNConfig
+
+
+class RFDETRSegDINOv3ConvNextSmallLateral(RFDETRSeg):
+    """Train an RF-DETR segmentation model with a DINOv3-ConvNeXt-Small backbone and a lateral-projection neck."""
+
+    size = "rfdetr-seg-dinov3-convnext-small-lateral"
+    _model_config_class = RFDETRSegDINOv3ConvNextSmallLateralConfig
+
+
+class RFDETRSegDINOv3ConvNextSmallFPN(RFDETRSeg):
+    """Train an RF-DETR segmentation model with a DINOv3-ConvNeXt-Small backbone and an FPN-style neck."""
+
+    size = "rfdetr-seg-dinov3-convnext-small-fpn"
+    _model_config_class = RFDETRSegDINOv3ConvNextSmallFPNConfig
+
+
+class RFDETRSegDINOv3ConvNextBaseLateral(RFDETRSeg):
+    """Train an RF-DETR segmentation model with a DINOv3-ConvNeXt-Base backbone and a lateral-projection neck."""
+
+    size = "rfdetr-seg-dinov3-convnext-base-lateral"
+    _model_config_class = RFDETRSegDINOv3ConvNextBaseLateralConfig
+
+
+class RFDETRSegDINOv3ConvNextBaseFPN(RFDETRSeg):
+    """Train an RF-DETR segmentation model with a DINOv3-ConvNeXt-Base backbone and an FPN-style neck."""
+
+    size = "rfdetr-seg-dinov3-convnext-base-fpn"
+    _model_config_class = RFDETRSegDINOv3ConvNextBaseFPNConfig
