@@ -25,14 +25,14 @@ from torch import nn
 from rfdetr.models.backbone.backbone import Backbone
 from rfdetr.models.backbone.base import BackboneBase
 from rfdetr.models.backbone.dinov3_convnext import DINOv3ConvNext
-from rfdetr.models.backbone.dinov3_convnext_neck import LateralNeck
+from rfdetr.models.backbone.dinov3_convnext_neck import FPNNeck, LateralNeck
 
 #: Sizes this backbone supports. Kept in one place so `_parse_name`'s validation and the name-registration loop
 #: at the bottom of this module can't drift apart.
 _SIZES = ("tiny", "small", "base")
-#: Neck kinds this backbone supports, mapped to their implementing class. `fpn` is added once `FPNNeck` exists
-#: (see rfdetr.models.backbone.dinov3_convnext_neck); only register name strings for neck kinds present here.
-_NECKS: dict[str, type[nn.Module]] = {"lateral": LateralNeck}
+#: Neck kinds this backbone supports, mapped to their implementing class (see
+#: rfdetr.models.backbone.dinov3_convnext_neck).
+_NECKS: dict[str, type[nn.Module]] = {"lateral": LateralNeck, "fpn": FPNNeck}
 
 
 def _parse_name(name: str) -> tuple[str, str]:

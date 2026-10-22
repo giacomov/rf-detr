@@ -18,7 +18,7 @@ from torch import Tensor
 import rfdetr.models.backbone.dinov3_convnext_backbone as backbone_module
 from rfdetr.models.backbone import Joiner, build_backbone
 from rfdetr.models.backbone.dinov3_convnext_backbone import DINOv3ConvNextEncoderBackbone, _parse_name
-from rfdetr.models.backbone.dinov3_convnext_neck import LateralNeck
+from rfdetr.models.backbone.dinov3_convnext_neck import FPNNeck, LateralNeck
 from rfdetr.utilities.tensors import NestedTensor
 
 
@@ -59,6 +59,55 @@ class TestLateralNeck:
         assert torch.equal(outs_a[2], outs_b[2])
 
 
+class TestFPNNeck:
+    """Shape contract and the top-down-fusion property that distinguishes it from LateralNeck."""
+
+    def test_projects_every_level_to_out_channels_preserving_shape(self) -> None:
+        neck = FPNNeck(in_channels=[96, 192, 384], out_channels=16)
+        feats = _random_feats([96, 192, 384], [32, 16, 8])
+
+        outs = neck(feats)
+
+        assert [tuple(o.shape) for o in outs] == [(2, 16, 32, 32), (2, 16, 16, 16), (2, 16, 8, 8)]
+
+    def test_wrong_number_of_input_levels_raises(self) -> None:
+        neck = FPNNeck(in_channels=[96, 192, 384], out_channels=16)
+
+        with pytest.raises(ValueError, match="built for 3 levels, got 2"):
+            neck(_random_feats([96, 192], [32, 16]))
+
+    def test_coarsest_level_change_propagates_to_every_finer_level(self) -> None:
+        """Unlike LateralNeck, changing the coarsest (P5) input must change every output level, since each finer
+        level's fusion adds the upsampled coarser level in."""
+        neck = FPNNeck(in_channels=[96, 192, 384], out_channels=16)
+        neck.eval()
+        feats_a = _random_feats([96, 192, 384], [32, 16, 8])
+        feats_b = [feats_a[0], feats_a[1], torch.randn_like(feats_a[2])]
+
+        with torch.no_grad():
+            outs_a = neck(feats_a)
+            outs_b = neck(feats_b)
+
+        assert not torch.equal(outs_a[0], outs_b[0])
+        assert not torch.equal(outs_a[1], outs_b[1])
+        assert not torch.equal(outs_a[2], outs_b[2])
+
+    def test_finest_level_change_does_not_propagate_to_coarser_levels(self) -> None:
+        """The fusion is top-down only: a change at the finest (P3) level must not affect coarser outputs."""
+        neck = FPNNeck(in_channels=[96, 192, 384], out_channels=16)
+        neck.eval()
+        feats_a = _random_feats([96, 192, 384], [32, 16, 8])
+        feats_b = [torch.randn_like(feats_a[0]), feats_a[1], feats_a[2]]
+
+        with torch.no_grad():
+            outs_a = neck(feats_a)
+            outs_b = neck(feats_b)
+
+        assert not torch.equal(outs_a[0], outs_b[0])
+        assert torch.equal(outs_a[1], outs_b[1])
+        assert torch.equal(outs_a[2], outs_b[2])
+
+
 class TestParseName:
     @pytest.mark.parametrize(
         ("name", "expected"),
@@ -66,6 +115,9 @@ class TestParseName:
             pytest.param("dinov3_convnext_tiny_lateral", ("tiny", "lateral"), id="tiny-lateral"),
             pytest.param("dinov3_convnext_small_lateral", ("small", "lateral"), id="small-lateral"),
             pytest.param("dinov3_convnext_base_lateral", ("base", "lateral"), id="base-lateral"),
+            pytest.param("dinov3_convnext_tiny_fpn", ("tiny", "fpn"), id="tiny-fpn"),
+            pytest.param("dinov3_convnext_small_fpn", ("small", "fpn"), id="small-fpn"),
+            pytest.param("dinov3_convnext_base_fpn", ("base", "fpn"), id="base-fpn"),
         ],
     )
     def test_valid_names(self, name: str, expected: tuple[str, str]) -> None:
@@ -77,7 +129,7 @@ class TestParseName:
             pytest.param("dinov3_convnext_tiny", id="missing-neck"),
             pytest.param("dinov2_windowed_small", id="wrong-family"),
             pytest.param("dinov3_convnext_huge_lateral", id="unknown-size"),
-            pytest.param("dinov3_convnext_tiny_fpn", id="unregistered-neck"),
+            pytest.param("dinov3_convnext_tiny_unknownneck", id="unknown-neck"),
         ],
     )
     def test_invalid_names_raise(self, name: str) -> None:
@@ -118,11 +170,17 @@ def _build(encoder: str, **overrides: Any) -> Joiner:
 
 
 class TestDINOv3ConvNextEncoderBackbone:
-    def test_builds_through_the_registry(self) -> None:
-        joiner = _build("dinov3_convnext_tiny_lateral")
+    @pytest.mark.parametrize("encoder", ["dinov3_convnext_tiny_lateral", "dinov3_convnext_tiny_fpn"])
+    def test_builds_through_the_registry(self, encoder: str) -> None:
+        joiner = _build(encoder)
 
         assert isinstance(joiner, Joiner)
         assert type(joiner[0]) is DINOv3ConvNextEncoderBackbone
+
+    def test_fpn_neck_is_an_fpn_neck(self) -> None:
+        joiner = _build("dinov3_convnext_tiny_fpn")
+
+        assert isinstance(joiner[0].projector, FPNNeck)
 
     def test_forward_produces_one_level_per_projector_scale_entry(self) -> None:
         joiner = _build("dinov3_convnext_tiny_lateral")
@@ -171,13 +229,12 @@ class TestDINOv3ConvNextEncoderBackbone:
         with pytest.raises(ValueError, match="requires out_feature_indexes"):
             _build("dinov3_convnext_tiny_lateral", out_feature_indexes=None)
 
-    def test_registered_for_every_size(self) -> None:
+    @pytest.mark.parametrize("neck", ["lateral", "fpn"])
+    def test_registered_for_every_size(self, neck: str) -> None:
         import rfdetr.models.backbone as backbone_pkg
 
         for size in ("tiny", "small", "base"):
-            assert backbone_pkg._BACKBONE_REGISTRY[f"dinov3_convnext_{size}_lateral"] is DINOv3ConvNextEncoderBackbone
-        # "fpn" isn't registered yet -- added alongside FPNNeck in a later step.
-        assert "dinov3_convnext_tiny_fpn" not in backbone_pkg._BACKBONE_REGISTRY
+            assert backbone_pkg._BACKBONE_REGISTRY[f"dinov3_convnext_{size}_{neck}"] is DINOv3ConvNextEncoderBackbone
 
     def test_module_is_registered_without_reimporting(self) -> None:
         """Guards against the registration call silently not running at import time."""

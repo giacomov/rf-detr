@@ -16,9 +16,15 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
 import torch
 
-from rfdetr.config import RFDETRDINOv3ConvNextTinyLateralConfig, TrainConfig
+from rfdetr.config import (
+    ModelConfig,
+    RFDETRDINOv3ConvNextTinyFPNConfig,
+    RFDETRDINOv3ConvNextTinyLateralConfig,
+    TrainConfig,
+)
 from rfdetr.models import MODEL_DEFAULTS, build_criterion_from_config, build_model_from_config
 from rfdetr.models.lwdetr import LWDETR
 
@@ -39,9 +45,18 @@ def _tiny_targets(batch_size: int, num_classes: int) -> list[dict[str, torch.Ten
     ]
 
 
+#: Both neck kinds, parametrizing the tests that exercise the full chain so FPNNeck gets the same real
+#: forward/backward coverage as LateralNeck, without duplicating every test in this file.
+_NECK_CONFIGS = [
+    pytest.param(RFDETRDINOv3ConvNextTinyLateralConfig, id="lateral"),
+    pytest.param(RFDETRDINOv3ConvNextTinyFPNConfig, id="fpn"),
+]
+
+
 class TestDINOv3ConvNextEndToEnd:
-    def test_builds_a_real_lwdetr_model(self) -> None:
-        mc = RFDETRDINOv3ConvNextTinyLateralConfig(resolution=128, num_classes=3)
+    @pytest.mark.parametrize("config_class", _NECK_CONFIGS)
+    def test_builds_a_real_lwdetr_model(self, config_class: type[ModelConfig]) -> None:
+        mc = config_class(resolution=128, num_classes=3)
 
         model = build_model_from_config(mc, defaults=_NO_PRETRAIN)
 
@@ -60,10 +75,11 @@ class TestDINOv3ConvNextEndToEnd:
         assert outputs["pred_logits"].shape == (2, mc.num_queries, 4)
         assert outputs["pred_boxes"].shape == (2, mc.num_queries, 4)
 
-    def test_forward_backward_through_real_decoder_with_3_levels(self) -> None:
+    @pytest.mark.parametrize("config_class", _NECK_CONFIGS)
+    def test_forward_backward_through_real_decoder_with_3_levels(self, config_class: type[ModelConfig]) -> None:
         """Exercises the genuine ``projector_scale=["P3","P4","P5"]`` path end-to-end: real backbone, real
-        lateral neck, real deformable transformer/decoder, real criterion, real backward pass."""
-        mc = RFDETRDINOv3ConvNextTinyLateralConfig(resolution=128, num_classes=3)
+        neck (lateral or FPN), real deformable transformer/decoder, real criterion, real backward pass."""
+        mc = config_class(resolution=128, num_classes=3)
         model = build_model_from_config(mc, defaults=_NO_PRETRAIN)
         criterion, _postprocess = build_criterion_from_config(mc, _TRAIN_CONFIG, defaults=_NO_PRETRAIN)
         model.train()
@@ -79,7 +95,7 @@ class TestDINOv3ConvNextEndToEnd:
         assert torch.isfinite(loss)
         loss.backward()
 
-        # Gradients must reach both the ConvNeXt encoder and the lateral neck -- confirms the whole chain
+        # Gradients must reach both the ConvNeXt encoder and the neck -- confirms the whole chain
         # (backbone -> neck -> transformer -> decoder -> criterion) is actually connected, not just shape-correct.
         backbone = model.backbone[0]
         encoder_grad_norms = [p.grad.norm().item() for p in backbone.encoder.parameters() if p.grad is not None]
@@ -87,7 +103,7 @@ class TestDINOv3ConvNextEndToEnd:
 
         assert encoder_grad_norms, "No gradients reached the DINOv3-ConvNeXt encoder."
         assert any(g > 0 for g in encoder_grad_norms)
-        assert neck_grad_norms, "No gradients reached the lateral neck."
+        assert neck_grad_norms, "No gradients reached the neck."
         assert any(g > 0 for g in neck_grad_norms)
 
     def test_one_optimizer_step_keeps_loss_finite(self) -> None:

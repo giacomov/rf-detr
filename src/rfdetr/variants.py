@@ -21,6 +21,7 @@ __all__ = [
     "RFDETRLarge",
     "RFDETRLargeDeprecated",
     "RFDETRDINOv3ConvNextTinyLateral",
+    "RFDETRDINOv3ConvNextTinyFPN",
     "RFDETRSeg",
     "RFDETRSegPreview",
     "RFDETRSegNano",
@@ -39,6 +40,7 @@ from rfdetr.config import (
     KeypointTrainConfig,
     ModelConfig,
     RFDETRBaseConfig,
+    RFDETRDINOv3ConvNextTinyFPNConfig,
     RFDETRDINOv3ConvNextTinyLateralConfig,
     RFDETRKeypointPreviewConfig,
     RFDETRLargeConfig,
@@ -159,6 +161,18 @@ class RFDETRDINOv3ConvNextTinyLateral(RFDETR):
 
     size = "rfdetr-dinov3-convnext-tiny-lateral"
     _model_config_class = RFDETRDINOv3ConvNextTinyLateralConfig
+
+
+class RFDETRDINOv3ConvNextTinyFPN(RFDETR):
+    """Train an RF-DETR model with a DINOv3-ConvNeXt-Tiny backbone and an FPN-style top-down-fusion neck.
+
+    Unlike :class:`RFDETRDINOv3ConvNextTinyLateral`, every output level here mixes information from every
+    coarser level via classic top-down upsample-and-add fusion. See
+    :mod:`rfdetr.models.backbone.dinov3_convnext_neck`.
+    """
+
+    size = "rfdetr-dinov3-convnext-tiny-fpn"
+    _model_config_class = RFDETRDINOv3ConvNextTinyFPNConfig
 
 
 class RFDETRSeg(RFDETR):

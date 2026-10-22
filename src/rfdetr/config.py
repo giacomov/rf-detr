@@ -28,10 +28,14 @@ EncoderName: TypeAlias = Literal[
     # DINOv3-ConvNeXt: a true CNN pyramid (stage2/3/4 == P3/P4/P5 natively, no resampling needed), registered
     # directly onto rfdetr.models.backbone._BACKBONE_REGISTRY by importing
     # rfdetr.models.backbone.dinov3_convnext_backbone (see that module's docstring for why it bypasses the
-    # guarded register_backbone() instead of calling it). "fpn"-neck names are added once FPNNeck exists.
+    # guarded register_backbone() instead of calling it). "lateral" is a minimal per-level channel projection;
+    # "fpn" adds classic top-down upsample-and-add fusion across levels (see dinov3_convnext_neck).
     "dinov3_convnext_tiny_lateral",
     "dinov3_convnext_small_lateral",
     "dinov3_convnext_base_lateral",
+    "dinov3_convnext_tiny_fpn",
+    "dinov3_convnext_small_fpn",
+    "dinov3_convnext_base_fpn",
 ]
 #: Dataset layout selectable via ``TrainConfig.dataset_file``. The builder registry that resolves each name lives
 #: in ``rfdetr.datasets``; this alias is the single typed source of the accepted names.
@@ -1131,6 +1135,12 @@ class RFDETRDINOv3ConvNextTinyLateralConfig(RFDETRDINOv3ConvNextConfig):
     """RF-DETR detection, DINOv3-ConvNeXt-Tiny backbone, minimal lateral-projection neck."""
 
     encoder: EncoderName = "dinov3_convnext_tiny_lateral"
+
+
+class RFDETRDINOv3ConvNextTinyFPNConfig(RFDETRDINOv3ConvNextConfig):
+    """RF-DETR detection, DINOv3-ConvNeXt-Tiny backbone, FPN-style top-down-fusion neck."""
+
+    encoder: EncoderName = "dinov3_convnext_tiny_fpn"
 
 
 class RFDETRSegPreviewConfig(RFDETRBaseConfig):
