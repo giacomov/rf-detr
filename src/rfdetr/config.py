@@ -36,6 +36,8 @@ EncoderName: TypeAlias = Literal[
     "dinov3_convnext_tiny_fpn",
     "dinov3_convnext_small_fpn",
     "dinov3_convnext_base_fpn",
+    # C-RADIOv3-B: vendored ViT-B/16 agglomerative encoder (same MultiScaleProjector path as DINOv2).
+    "c_radio_v3_base",
 ]
 #: Dataset layout selectable via ``TrainConfig.dataset_file``. The builder registry that resolves each name lives
 #: in ``rfdetr.datasets``; this alias is the single typed source of the accepted names.
@@ -1172,6 +1174,47 @@ class RFDETRSegDINOv3ConvNextConfig(RFDETRDINOv3ConvNextConfig):
     """Shared fields for every DINOv3-ConvNeXt segmentation config (see ``RFDETRDINOv3ConvNextConfig``)."""
 
     segmentation_head: bool = True
+
+
+class RFDETRCRadioV3BaseConfig(ModelConfig):
+    """RF-DETR detection with a vendored C-RADIOv3-B (ViT-B/16) encoder.
+
+    Uses the same ``MultiScaleProjector`` path as the DINOv2 windowed variants: several same-resolution intermediate
+    maps are resampled into the P-level pyramid. ``num_windows=1`` because this encoder runs global attention (ViTDet
+    windows are out of scope for v1). ``resolution=512`` matches RADIO's preferred resolution; ``pretrain_weights`` is
+    ``None`` until an Objects365/COCO-trained RF-DETR checkpoint exists.
+    """
+
+    encoder: EncoderName = "c_radio_v3_base"
+    hidden_dim: int = 256
+    patch_size: int = 16
+    num_windows: int = 1
+    dec_layers: int = 4
+    sa_nheads: int = 8
+    ca_nheads: int = 16
+    dec_n_points: int = 2
+    num_queries: int = 300
+    num_select: int = 300
+    projector_scale: list[Literal["P3", "P4", "P5"]] = ["P4"]
+    out_feature_indexes: list[int] = [3, 6, 9, 12]
+    resolution: int = 512
+    positional_encoding_size: int = 512 // 16
+    pretrain_weights: PathLikeStr | None = None
+    num_classes: int = 90
+
+
+class RFDETRSegCRadioV3BaseConfig(RFDETRCRadioV3BaseConfig):
+    """RF-DETR segmentation with a vendored C-RADIOv3-B encoder.
+
+    ``resolution=576`` yields a 36×36 token grid (same spatial count as the patch-12 seg models at 432 px) while keeping
+    RADIO's native patch size of 16.
+    """
+
+    segmentation_head: bool = True
+    resolution: int = 576
+    positional_encoding_size: int = 576 // 16
+    num_queries: int = 100
+    num_select: int = 100
 
 
 class RFDETRSegDINOv3ConvNextTinyLateralConfig(RFDETRSegDINOv3ConvNextConfig):

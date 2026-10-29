@@ -362,6 +362,7 @@ def _mps_lacks_antialiased_resize() -> bool:
 # ModelContext and _build_model_context are eagerly imported above (runtime use in get_model).
 _VARIANT_EXPORTS = (
     "RFDETRBase",
+    "RFDETRCRadioV3Base",
     "RFDETRDINOv3ConvNextBaseFPN",
     "RFDETRDINOv3ConvNextBaseLateral",
     "RFDETRDINOv3ConvNextSmallFPN",
@@ -375,6 +376,7 @@ _VARIANT_EXPORTS = (
     "RFDETRNano",
     "RFDETRSeg",
     "RFDETRSeg2XLarge",
+    "RFDETRSegCRadioV3Base",
     "RFDETRSegDINOv3ConvNextBaseFPN",
     "RFDETRSegDINOv3ConvNextBaseLateral",
     "RFDETRSegDINOv3ConvNextSmallFPN",
@@ -411,15 +413,17 @@ _CHECKPOINT_MODEL_MAP_ENTRIES: tuple[tuple[str, str], ...] = (
     ("seg-dinov3-convnext-small-fpn", "RFDETRSegDINOv3ConvNextSmallFPN"),
     ("seg-dinov3-convnext-base-lateral", "RFDETRSegDINOv3ConvNextBaseLateral"),
     ("seg-dinov3-convnext-base-fpn", "RFDETRSegDINOv3ConvNextBaseFPN"),
-    # These dinov3-convnext-* entries must stay ahead of the bare "small"/"base" entries below: "small" and
-    # "base" are themselves substrings of e.g. "dinov3-convnext-small-lateral"/"dinov3-convnext-base-fpn", and
-    # resolution below picks the first matching entry in iteration order.
+    ("seg-c-radio-v3-base", "RFDETRSegCRadioV3Base"),
+    # These dinov3-convnext-* / c-radio-* entries must stay ahead of the bare "small"/"base" entries below:
+    # "small" and "base" are themselves substrings of e.g. "dinov3-convnext-small-lateral" /
+    # "c-radio-v3-base", and resolution below picks the first matching entry in iteration order.
     ("dinov3-convnext-tiny-lateral", "RFDETRDINOv3ConvNextTinyLateral"),
     ("dinov3-convnext-tiny-fpn", "RFDETRDINOv3ConvNextTinyFPN"),
     ("dinov3-convnext-small-lateral", "RFDETRDINOv3ConvNextSmallLateral"),
     ("dinov3-convnext-small-fpn", "RFDETRDINOv3ConvNextSmallFPN"),
     ("dinov3-convnext-base-lateral", "RFDETRDINOv3ConvNextBaseLateral"),
     ("dinov3-convnext-base-fpn", "RFDETRDINOv3ConvNextBaseFPN"),
+    ("c-radio-v3-base", "RFDETRCRadioV3Base"),
     ("large", "RFDETRLarge"),
     ("medium", "RFDETRMedium"),
     ("small", "RFDETRSmall"),

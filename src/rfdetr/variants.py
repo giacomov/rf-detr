@@ -26,6 +26,7 @@ __all__ = [
     "RFDETRDINOv3ConvNextSmallFPN",
     "RFDETRDINOv3ConvNextBaseLateral",
     "RFDETRDINOv3ConvNextBaseFPN",
+    "RFDETRCRadioV3Base",
     "RFDETRSeg",
     "RFDETRSegPreview",
     "RFDETRSegNano",
@@ -40,6 +41,7 @@ __all__ = [
     "RFDETRSegDINOv3ConvNextSmallFPN",
     "RFDETRSegDINOv3ConvNextBaseLateral",
     "RFDETRSegDINOv3ConvNextBaseFPN",
+    "RFDETRSegCRadioV3Base",
 ]
 
 from typing import Any
@@ -50,6 +52,7 @@ from rfdetr.config import (
     KeypointTrainConfig,
     ModelConfig,
     RFDETRBaseConfig,
+    RFDETRCRadioV3BaseConfig,
     RFDETRDINOv3ConvNextBaseFPNConfig,
     RFDETRDINOv3ConvNextBaseLateralConfig,
     RFDETRDINOv3ConvNextSmallFPNConfig,
@@ -62,6 +65,7 @@ from rfdetr.config import (
     RFDETRMediumConfig,
     RFDETRNanoConfig,
     RFDETRSeg2XLargeConfig,
+    RFDETRSegCRadioV3BaseConfig,
     RFDETRSegDINOv3ConvNextBaseFPNConfig,
     RFDETRSegDINOv3ConvNextBaseLateralConfig,
     RFDETRSegDINOv3ConvNextSmallFPNConfig,
@@ -223,6 +227,17 @@ class RFDETRDINOv3ConvNextBaseFPN(RFDETR):
     _model_config_class = RFDETRDINOv3ConvNextBaseFPNConfig
 
 
+class RFDETRCRadioV3Base(RFDETR):
+    """Train an RF-DETR detection model with a vendored NVIDIA C-RADIOv3-B (ViT-B/16) encoder.
+
+    Uses the same ``MultiScaleProjector`` path as the DINOv2 variants. Encoder weights download at first use under the
+    NVIDIA Open Model License; there is no RF-DETR Objects365 checkpoint yet (``pretrain_weights=None``).
+    """
+
+    size = "rfdetr-c-radio-v3-base"
+    _model_config_class = RFDETRCRadioV3BaseConfig
+
+
 class RFDETRSeg(RFDETR):
     """Base class for all RF-DETR segmentation models.
 
@@ -356,3 +371,10 @@ class RFDETRSegDINOv3ConvNextBaseFPN(RFDETRSeg):
 
     size = "rfdetr-seg-dinov3-convnext-base-fpn"
     _model_config_class = RFDETRSegDINOv3ConvNextBaseFPNConfig
+
+
+class RFDETRSegCRadioV3Base(RFDETRSeg):
+    """Train an RF-DETR segmentation model with a vendored NVIDIA C-RADIOv3-B (ViT-B/16) encoder."""
+
+    size = "rfdetr-seg-c-radio-v3-base"
+    _model_config_class = RFDETRSegCRadioV3BaseConfig

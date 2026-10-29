@@ -30,6 +30,8 @@ _IS_PYTORCH_LIGHTNING_INSTALLED = is_installed("pytorch_lightning")
 _IS_PYTORCH_OPTIMIZER_INSTALLED = is_installed("pytorch_optimizer")
 #: Whether the optional PEFT package is installed.
 _IS_PEFT_INSTALLED = is_installed("peft")
+#: Whether the optional timm package is installed (used only by the C-RADIOv3 parity integration test).
+_IS_TIMM_INSTALLED = is_installed("timm")
 
 #: Whether the optional Kornia package is installed.
 _IS_KORNIA_INSTALLED = is_installed("kornia")

@@ -170,4 +170,5 @@ def build_backbone(
 # including direct test calls that never import rfdetr.variants. `_BACKBONE_REGISTRY` is already defined above by
 # the time this runs, so the self-referential `from rfdetr.models.backbone import _BACKBONE_REGISTRY` inside that
 # module resolves against this (still-initializing) package correctly.
+from rfdetr.models.backbone import c_radio_v3_backbone as _c_radio_v3_backbone  # noqa: E402,F401
 from rfdetr.models.backbone import dinov3_convnext_backbone as _dinov3_convnext_backbone  # noqa: E402,F401
