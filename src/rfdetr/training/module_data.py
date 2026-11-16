@@ -435,8 +435,29 @@ class RFDETRDataModule(LightningDataModule):
                         f"multi_scale='{multi_scale.value}'). Set square_resize_div_64=True and "
                         "multi_scale='per-batch' or 'off', or use augmentation_backend='cpu'/'albumentations'."
                     )
+            if self.train_config.multi_label_targets:
+                unsupported = {"yolo", "webdataset", "o365"}
+                if self.train_config.dataset_file in unsupported:
+                    raise ValueError(
+                        f"multi_label_targets is not supported with dataset_file="
+                        f"'{self.train_config.dataset_file}'. Use 'coco' or 'roboflow' with a "
+                        "COCO-format annotation file."
+                    )
+                if is_gpu_postprocess(resolved):
+                    raise ValueError(
+                        "multi_label_targets is not supported with the kornia/GPU augmentation "
+                        "backend (it filters only known target fields and would leave label_sets "
+                        "misaligned). Use augmentation_backend='albumentations' or 'torchvision'."
+                    )
+                if self.train_config.pad_targets_to is not None:
+                    raise ValueError(
+                        "multi_label_targets is not supported with pad_targets_to. "
+                        "Set pad_targets_to=None."
+                    )
             if self._dataset_train is None:
                 self._dataset_train = build_dataset("train", ns, resolution)
+                if self.train_config.multi_label_targets:
+                    self._validate_multi_label_train_dataset()
             if self._dataset_val is None:
                 self._dataset_val = build_dataset("val", ns, resolution)
             dataset_class_names, labels_remapped = self._dataset_label_space()
@@ -458,6 +479,68 @@ class RFDETRDataModule(LightningDataModule):
         elif stage == "predict":
             if self._dataset_val is None:
                 self._dataset_val = build_dataset("val", ns, resolution)
+
+    def _validate_multi_label_train_dataset(self) -> None:
+        """Confirm multi-label merging is wired and that the train set has multi-label objects.
+
+        Reads annotations only (never image files): asserts ``ConvertCoco`` received the IoU
+        threshold, runs the merge over every training image, logs combination counts, and raises
+        if no multi-label object is found.
+        """
+        from rfdetr.datasets.coco import CocoDetection
+        from rfdetr.datasets.multilabel import summarize_multilabel_merges
+
+        dataset = self._dataset_train
+        if not isinstance(dataset, CocoDetection):
+            raise ValueError(
+                f"multi_label_targets expects a CocoDetection train dataset, got "
+                f"{type(dataset).__name__}."
+            )
+        threshold = dataset.prepare.multi_label_iou_threshold
+        num_classes = dataset.prepare.num_classes
+        if threshold is None or num_classes is None:
+            raise ValueError(
+                "multi_label_targets is set but the train dataset's ConvertCoco has no "
+                f"multi_label_iou_threshold (got threshold={threshold!r}, num_classes={num_classes!r}). "
+                "The COCO builder never received the flag — check dataset_file and the train split wiring."
+            )
+        summary = summarize_multilabel_merges(
+            dataset.coco,
+            cat2label=dataset.cat2label,
+            num_classes=num_classes,
+            iou_threshold=threshold,
+        )
+        combination_counts = summary["combination_counts"]
+        # Prefer human-readable names when the reverse map is available.
+        label2cat = dataset.label2cat
+        cats = dataset.coco.cats if hasattr(dataset.coco, "cats") else {}
+        readable: dict[str, int] = {}
+        for combo, count in combination_counts.items():
+            names: list[str] = []
+            for label in combo:
+                if label2cat is not None and label in label2cat:
+                    cat_id = label2cat[label]
+                    names.append(str(cats.get(cat_id, {}).get("name", cat_id)))
+                else:
+                    names.append(str(label))
+            readable["+".join(names)] = count
+        logger.info(
+            "multi_label_targets: images=%d objects_before=%d objects_after=%d "
+            "multi_label_objects=%d iou_threshold=%.4f combinations=%s",
+            summary["num_images"],
+            summary["num_objects_before"],
+            summary["num_objects_after"],
+            summary["num_multilabel_objects"],
+            threshold,
+            readable,
+        )
+        if summary["num_multilabel_objects"] == 0:
+            raise ValueError(
+                "multi_label_targets is set but no multi-label objects were found in the train "
+                f"annotations (iou_threshold={threshold}, dataset_file="
+                f"'{self.train_config.dataset_file}'). Check that different-class boxes share "
+                "nearly identical coordinates, or lower multi_label_iou_threshold."
+            )
 
     def _build_test_dataset(self, ns: Any, resolution: int) -> torch.utils.data.Dataset[Any]:
         """Build the dataset backing ``setup("test")``, preferring a real test split.

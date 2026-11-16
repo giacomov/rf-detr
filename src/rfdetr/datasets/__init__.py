@@ -98,6 +98,11 @@ def build_roboflow(image_set: str, args: Any, resolution: int) -> Dataset[Any]:
 
     if dataset_format == "coco":
         return build_roboflow_from_coco(image_set, args, resolution)
+    if getattr(args, "multi_label_targets", False):
+        raise ValueError(
+            "multi_label_targets requires a COCO-format Roboflow dataset "
+            f"(train/_annotations.coco.json). Detected YOLO layout under {root}."
+        )
     return build_roboflow_from_yolo(image_set, args, resolution)
 
 

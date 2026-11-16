@@ -45,6 +45,7 @@ from rfdetr.datasets._torchvision import (
 from rfdetr.datasets.aug_configs import AUG_CONFIG
 from rfdetr.datasets.io_utils import decode_pil_image
 from rfdetr.datasets.kornia_transforms import is_gpu_postprocess, resolve_backend_for_build
+from rfdetr.datasets.multilabel import merge_multilabel_annotations
 from rfdetr.datasets.transforms import AlbumentationsWrapper, Normalize
 from rfdetr.utilities.logger import get_logger
 
@@ -642,6 +643,9 @@ class CocoDetection(torchvision.datasets.CocoDetection):  # type: ignore[misc]
         draft_size: Smallest source extent the transform pipeline can consume without upscaling, used to enable
             JPEG DCT-domain downscaling during decode (see :meth:`_decode_image`).  ``None`` (the default) decodes at
             full resolution.  :func:`draft_size_for_transforms` derives the value from the pipeline's scales.
+        multi_label_iou_threshold: When set, :class:`ConvertCoco` merges different-class boxes whose IoU is at
+            least this value into one multi-label target before any augmentation. ``None`` keeps stock single-label
+            behaviour. Training builders pass this only for the train split.
     """
 
     def __init__(
@@ -655,6 +659,7 @@ class CocoDetection(torchvision.datasets.CocoDetection):  # type: ignore[misc]
         remap_category_ids: bool = False,
         cat2label: dict[int, int] | None = None,
         draft_size: int | None = None,
+        multi_label_iou_threshold: float | None = None,
     ) -> None:
         super().__init__(img_folder, ann_file)
         self._transforms = transforms
@@ -691,11 +696,25 @@ class CocoDetection(torchvision.datasets.CocoDetection):  # type: ignore[misc]
         else:
             self.cat2label = None
             self.label2cat = None
+        num_label_columns: int | None = None
+        if multi_label_iou_threshold is not None:
+            if self.cat2label is not None:
+                num_label_columns = len(self.cat2label)
+            else:
+                # Raw COCO category ids: the multi-hot width must cover the largest id that appears.
+                category_ids = [int(category_id) for category_id in self.coco.cats]
+                if not category_ids:
+                    raise ValueError(
+                        "multi_label_iou_threshold requires at least one category in the annotation file."
+                    )
+                num_label_columns = max(category_ids) + 1
         self.prepare = ConvertCoco(
             include_masks=include_masks,
             include_keypoints=include_keypoints,
             cat2label=self.cat2label,
             num_keypoints_per_class=num_keypoints_per_class,
+            multi_label_iou_threshold=multi_label_iou_threshold,
+            num_classes=num_label_columns,
         )
 
     def _decode_image(self, image_id: int) -> tuple[Image.Image, tuple[float, float]]:
@@ -758,6 +777,11 @@ class ConvertCoco:
             COCO-style datasets (e.g. IDs 1–90 with gaps) so that labels stay within the model's output range.
         num_keypoints_per_class: Optional keypoint schema. When provided, keypoints
             are padded/truncated to ``max(num_keypoints_per_class)`` in each annotation.
+        multi_label_iou_threshold: When set together with ``num_classes``, merge
+            different-class boxes whose IoU is at least this value into one target with a
+            multi-hot ``label_sets`` row. ``None`` keeps stock single-label behaviour.
+        num_classes: Width of the ``label_sets`` multi-hot matrix. Required when
+            ``multi_label_iou_threshold`` is set.
     """
 
     def __init__(
@@ -766,11 +790,19 @@ class ConvertCoco:
         include_keypoints: bool = False,
         cat2label: dict[int, int] | None = None,
         num_keypoints_per_class: list[int] | None = None,
+        multi_label_iou_threshold: float | None = None,
+        num_classes: int | None = None,
     ) -> None:
         self.include_masks = include_masks
         self.include_keypoints = include_keypoints
         self.cat2label = cat2label
         self.num_keypoints = max(num_keypoints_per_class, default=0) if num_keypoints_per_class is not None else 0
+        if multi_label_iou_threshold is not None and num_classes is None:
+            raise ValueError("num_classes is required when multi_label_iou_threshold is set.")
+        if multi_label_iou_threshold is not None and include_keypoints:
+            raise ValueError("multi_label_iou_threshold is not supported with keypoints.")
+        self.multi_label_iou_threshold = multi_label_iou_threshold
+        self.num_classes = num_classes
 
     def __call__(self, image: Image.Image, target: dict[str, Any]) -> tuple[Image.Image, dict[str, Any]]:
         w, h = image.size
@@ -867,6 +899,27 @@ class ConvertCoco:
             target["masks"] = masks[keep].bool()
             if keypoint_keep is not None:
                 target["masks"] = target["masks"][keypoint_keep]
+
+        if self.multi_label_iou_threshold is not None:
+            assert self.num_classes is not None  # validated in __init__
+            merged = merge_multilabel_annotations(
+                target["boxes"],
+                target["labels"],
+                num_classes=self.num_classes,
+                iou_threshold=self.multi_label_iou_threshold,
+                masks=target.get("masks"),
+                area=target.get("area"),
+                iscrowd=target.get("iscrowd"),
+            )
+            target["boxes"] = merged["boxes"]
+            target["labels"] = merged["labels"]
+            target["label_sets"] = merged["label_sets"]
+            if "masks" in merged:
+                target["masks"] = merged["masks"]
+            if "area" in merged:
+                target["area"] = merged["area"]
+            if "iscrowd" in merged:
+                target["iscrowd"] = merged["iscrowd"]
 
         target["orig_size"] = torch.as_tensor([int(h), int(w)])
         target["size"] = torch.as_tensor([int(h), int(w)])
@@ -1416,6 +1469,18 @@ def make_coco_transforms_square_div_64(
     )
 
 
+def _train_multi_label_iou_threshold(image_set: str, args: Any) -> float | None:
+    """Return the multi-label merge threshold for the train split, or ``None``.
+
+    Validation and test keep raw single-label annotations so COCO eval stays comparable.
+    """
+    if image_set.split("_", maxsplit=1)[0] != "train":
+        return None
+    if not getattr(args, "multi_label_targets", False):
+        return None
+    return float(getattr(args, "multi_label_iou_threshold", 0.99))
+
+
 def build_coco(image_set: str, args: Any, resolution: int) -> CocoDetection:
     """Build a COCO dataset from an explicit configuration namespace.
 
@@ -1486,6 +1551,7 @@ def build_coco(image_set: str, args: Any, resolution: int) -> CocoDetection:
         include_masks=include_masks,
     )
 
+    multi_label_iou_threshold = _train_multi_label_iou_threshold(image_set, args)
     if square_resize_div_64:
         logger.info(f"Building COCO {image_set} dataset with square resize at resolution {resolution}")
         dataset = CocoDetection(
@@ -1512,6 +1578,7 @@ def build_coco(image_set: str, args: Any, resolution: int) -> CocoDetection:
             # the other silently misaligns training supervision.
             remap_category_ids=include_keypoints,
             draft_size=draft_size,
+            multi_label_iou_threshold=multi_label_iou_threshold,
         )
     else:
         logger.info(f"Building COCO {image_set} dataset at resolution {resolution}")
@@ -1539,6 +1606,7 @@ def build_coco(image_set: str, args: Any, resolution: int) -> CocoDetection:
             # the other silently misaligns training supervision.
             remap_category_ids=include_keypoints,
             draft_size=draft_size,
+            multi_label_iou_threshold=multi_label_iou_threshold,
         )
     return dataset
 
@@ -1615,6 +1683,7 @@ def build_roboflow_from_coco(image_set: str, args: Any, resolution: int) -> Coco
         include_masks=include_masks,
     )
 
+    multi_label_iou_threshold = _train_multi_label_iou_threshold(image_set, args)
     if square_resize_div_64:
         logger.info(f"Building Roboflow {image_set} dataset with square resize at resolution {resolution}")
         dataset = CocoDetection(
@@ -1639,6 +1708,7 @@ def build_roboflow_from_coco(image_set: str, args: Any, resolution: int) -> Coco
             remap_category_ids=True,
             cat2label=cat2label,
             draft_size=draft_size,
+            multi_label_iou_threshold=multi_label_iou_threshold,
         )
     else:
         logger.info(f"Building Roboflow {image_set} dataset at resolution {resolution}")
@@ -1664,5 +1734,6 @@ def build_roboflow_from_coco(image_set: str, args: Any, resolution: int) -> Coco
             remap_category_ids=True,
             cat2label=cat2label,
             draft_size=draft_size,
+            multi_label_iou_threshold=multi_label_iou_threshold,
         )
     return dataset

@@ -1127,7 +1127,7 @@ class HungarianMatcher(nn.Module):
         return self._assign_compact_cost_matrix(diagonal_cost_matrix, sizes, group_detr)
 
 
-def build_matcher(args: Any) -> HungarianMatcher:
+def build_matcher(args: Any, matcher_cls: type[HungarianMatcher] | None = None) -> HungarianMatcher:
     """Build a HungarianMatcher from a training argument namespace.
 
     Args:
@@ -1137,10 +1137,13 @@ def build_matcher(args: Any) -> HungarianMatcher:
             ``keypoint_visible_loss_coef``, ``keypoint_nll_loss_coef``). When
             ``segmentation_head`` is truthy, also requires ``mask_ce_loss_coef``,
             ``mask_dice_loss_coef``, and ``mask_point_sample_ratio``.
+        matcher_cls: Matcher class to instantiate. Defaults to :class:`HungarianMatcher`.
+            Multi-label training passes :class:`~rfdetr.models.multilabel.MultiLabelHungarianMatcher`.
 
     Returns:
         Configured HungarianMatcher instance.
     """
+    cls = matcher_cls if matcher_cls is not None else HungarianMatcher
     # Detection-only matcher args may omit keypoint costs; zero defaults disable keypoint matching terms.
     common_kwargs = {
         "cost_class": args.set_cost_class,
@@ -1154,11 +1157,11 @@ def build_matcher(args: Any) -> HungarianMatcher:
         "keypoint_nll_loss_coef": getattr(args, "keypoint_nll_loss_coef", 0.0),
     }
     if args.segmentation_head:
-        return HungarianMatcher(
+        return cls(
             **common_kwargs,
             cost_mask_ce=args.mask_ce_loss_coef,
             cost_mask_dice=args.mask_dice_loss_coef,
             mask_point_sample_ratio=args.mask_point_sample_ratio,
         )
     else:
-        return HungarianMatcher(**common_kwargs)
+        return cls(**common_kwargs)

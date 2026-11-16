@@ -1711,6 +1711,10 @@ class TrainConfig(BaseConfig):
     persistent_workers: bool | None = None
     prefetch_factor: int | None = None
     pack_targets: bool = True
+    # Merge co-located different-class boxes into multi-hot targets at dataset load time
+    # (ConvertCoco, before augmentation). Supported only for COCO / Roboflow-COCO layouts.
+    multi_label_targets: bool = False
+    multi_label_iou_threshold: float = 0.99
 
     @field_validator("batch_size", mode="after")
     @classmethod
@@ -1720,6 +1724,14 @@ class TrainConfig(BaseConfig):
             return v
         if v < 1:
             raise ValueError("batch_size must be >= 1, or 'auto'.")
+        return v
+
+    @field_validator("multi_label_iou_threshold", mode="after")
+    @classmethod
+    def validate_multi_label_iou_threshold(cls, v: float) -> float:
+        """Validate the multi-label merge threshold lies in ``(0, 1]``."""
+        if not 0.0 < v <= 1.0:
+            raise ValueError(f"multi_label_iou_threshold must be in (0, 1], got {v}.")
         return v
 
     @field_validator("eval_batch_size", mode="after")

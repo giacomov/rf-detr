@@ -921,14 +921,28 @@ def build_model(args: "BuilderArgs") -> LWDETR | tuple[Any, None, None]:
 
 def build_criterion_and_postprocessors(args: "BuilderArgs") -> tuple[SetCriterion, PostProcess]:
     device = torch.device(args.device)
-    matcher = build_matcher(args)
+    multi_label = bool(getattr(args, "multi_label_targets", False))
+    has_keypoints = getattr(args, "use_grouppose_keypoints", False)
+    if multi_label:
+        if has_keypoints:
+            raise ValueError("multi_label_targets is not supported with keypoint training.")
+        if not args.ia_bce_loss:
+            raise ValueError("multi_label_targets requires ia_bce_loss=True.")
+        from rfdetr.models.multilabel import MultiLabelHungarianMatcher, MultiLabelSetCriterion
+
+        matcher_cls = MultiLabelHungarianMatcher
+        criterion_cls: type[SetCriterion] = MultiLabelSetCriterion
+    else:
+        matcher_cls = None
+        criterion_cls = SetCriterion
+
+    matcher = build_matcher(args, matcher_cls=matcher_cls)
     weight_dict = {"loss_ce": args.cls_loss_coef, "loss_bbox": args.bbox_loss_coef}
     weight_dict["loss_giou"] = args.giou_loss_coef
     if args.segmentation_head:
         weight_dict["loss_mask_ce"] = args.mask_ce_loss_coef
         weight_dict["loss_mask_dice"] = args.mask_dice_loss_coef
     # Detection-only training args may omit keypoint loss knobs; read them only for keypoint mode.
-    has_keypoints = getattr(args, "use_grouppose_keypoints", False)
     if has_keypoints:
         weight_dict["loss_keypoints_l1"] = getattr(args, "keypoint_l1_loss_coef", 0.0)
         weight_dict["loss_keypoints_findable"] = getattr(args, "keypoint_findable_loss_coef", 0.0)
@@ -950,35 +964,21 @@ def build_criterion_and_postprocessors(args: "BuilderArgs") -> tuple[SetCriterio
         losses.append("keypoints")
 
     sum_group_losses = getattr(args, "sum_group_losses", False)
+    criterion_kwargs: dict[str, Any] = {
+        "matcher": matcher,
+        "weight_dict": weight_dict,
+        "focal_alpha": args.focal_alpha,
+        "losses": losses,
+        "group_detr": args.group_detr,
+        "sum_group_losses": sum_group_losses,
+        "use_varifocal_loss": args.use_varifocal_loss,
+        "use_position_supervised_loss": args.use_position_supervised_loss,
+        "ia_bce_loss": args.ia_bce_loss,
+        "num_keypoints_per_class": getattr(args, "num_keypoints_per_class", []),
+    }
     if args.segmentation_head:
-        criterion = SetCriterion(
-            args.num_classes + 1,
-            matcher=matcher,
-            weight_dict=weight_dict,
-            focal_alpha=args.focal_alpha,
-            losses=losses,
-            group_detr=args.group_detr,
-            sum_group_losses=sum_group_losses,
-            use_varifocal_loss=args.use_varifocal_loss,
-            use_position_supervised_loss=args.use_position_supervised_loss,
-            ia_bce_loss=args.ia_bce_loss,
-            mask_point_sample_ratio=args.mask_point_sample_ratio,
-            num_keypoints_per_class=getattr(args, "num_keypoints_per_class", []),
-        )
-    else:
-        criterion = SetCriterion(
-            args.num_classes + 1,
-            matcher=matcher,
-            weight_dict=weight_dict,
-            focal_alpha=args.focal_alpha,
-            losses=losses,
-            group_detr=args.group_detr,
-            sum_group_losses=sum_group_losses,
-            use_varifocal_loss=args.use_varifocal_loss,
-            use_position_supervised_loss=args.use_position_supervised_loss,
-            ia_bce_loss=args.ia_bce_loss,
-            num_keypoints_per_class=getattr(args, "num_keypoints_per_class", []),
-        )
+        criterion_kwargs["mask_point_sample_ratio"] = args.mask_point_sample_ratio
+    criterion = criterion_cls(args.num_classes + 1, **criterion_kwargs)
     criterion.to(device)
     postprocess = PostProcess(
         num_select=args.num_select,
