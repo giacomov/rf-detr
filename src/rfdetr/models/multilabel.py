@@ -221,8 +221,10 @@ class MultiLabelSetCriterion(SetCriterion):
         # Expand each matched query across every positive class column.
         match_indices, class_indices = matched_label_sets.nonzero(as_tuple=True)
         if match_indices.numel() > 0:
-            batch_idx = idx[0][match_indices]
-            query_idx = idx[1][match_indices]
+            # Matcher indices live on CPU; nonzero() output lives on the logits device.
+            device = src_logits.device
+            batch_idx = idx[0].to(device)[match_indices]
+            query_idx = idx[1].to(device)[match_indices]
             iou_for_pos = pos_ious[match_indices]
             t = prob[batch_idx, query_idx, class_indices].pow(alpha) * iou_for_pos.pow(1 - alpha)
             t = torch.clamp(t, 0.01).detach()
