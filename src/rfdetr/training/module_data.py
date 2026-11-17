@@ -504,11 +504,16 @@ class RFDETRDataModule(LightningDataModule):
                 f"multi_label_iou_threshold (got threshold={threshold!r}, num_classes={num_classes!r}). "
                 "The COCO builder never received the flag — check dataset_file and the train split wiring."
             )
+        logger.info(
+            "multi_label_targets: checking merges over %d train images",
+            len(dataset.coco.imgs),
+        )
         summary = summarize_multilabel_merges(
             dataset.coco,
             cat2label=dataset.cat2label,
             num_classes=num_classes,
             iou_threshold=threshold,
+            show_progress=is_main_process(),
         )
         combination_counts = summary["combination_counts"]
         # Prefer human-readable names when the reverse map is available.

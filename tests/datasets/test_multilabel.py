@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -217,6 +218,74 @@ class TestTrainThresholdHelper:
         assert _train_multi_label_iou_threshold("train", args) is None
 
 
+def _summary_via_torch_merge(
+    images: dict[int, dict[str, Any]],
+    anns_by_image: dict[int, list[dict[str, Any]]],
+    *,
+    cat2label: dict[int, int] | None,
+    num_classes: int,
+    iou_threshold: float,
+) -> dict[str, Any]:
+    """Reference summary that calls ``merge_multilabel_annotations`` per image."""
+    num_objects_before = 0
+    num_objects_after = 0
+    num_multilabel = 0
+    combination_counts: Counter[tuple[int, ...]] = Counter()
+    for image_id, info in images.items():
+        width = float(info["width"])
+        height = float(info["height"])
+        box_rows: list[list[float]] = []
+        label_rows: list[int] = []
+        for ann in anns_by_image.get(image_id, []):
+            if ann.get("iscrowd", 0):
+                continue
+            x, y, w, h = ann["bbox"]
+            x1 = max(0.0, float(x))
+            y1 = max(0.0, float(y))
+            x2 = min(width, float(x) + float(w))
+            y2 = min(height, float(y) + float(h))
+            if x2 <= x1 or y2 <= y1:
+                continue
+            category_id = int(ann["category_id"])
+            if cat2label is not None:
+                if category_id not in cat2label:
+                    continue
+                label_rows.append(cat2label[category_id])
+            else:
+                label_rows.append(category_id)
+            box_rows.append([x1, y1, x2, y2])
+        if not box_rows:
+            continue
+        boxes = torch.tensor(box_rows, dtype=torch.float32)
+        labels = torch.tensor(label_rows, dtype=torch.int64)
+        num_objects_before += boxes.shape[0]
+        merged = merge_multilabel_annotations(
+            boxes, labels, num_classes=num_classes, iou_threshold=iou_threshold
+        )
+        label_sets = merged["label_sets"]
+        num_objects_after += label_sets.shape[0]
+        for row in label_sets:
+            positive = tuple(sorted(int(i) for i in row.nonzero(as_tuple=False).flatten().tolist()))
+            if len(positive) > 1:
+                num_multilabel += 1
+                combination_counts[positive] += 1
+    return {
+        "num_images": len(images),
+        "num_objects_before": num_objects_before,
+        "num_objects_after": num_objects_after,
+        "num_multilabel_objects": num_multilabel,
+        "combination_counts": dict(combination_counts),
+    }
+
+
+def _coco_from_anns(
+    images: dict[int, dict[str, Any]],
+    anns_by_image: dict[int, list[dict[str, Any]]],
+) -> SimpleNamespace:
+    """Lightweight COCO-like object with ``imgToAnns`` for the NumPy summary path."""
+    return SimpleNamespace(imgs=images, imgToAnns=anns_by_image)
+
+
 class TestSummarizeWithoutImages:
     def test_summarize_finds_duplicates(self, tmp_path: Path) -> None:
         # Minimal fake COCO API object — no image files.
@@ -236,6 +305,71 @@ class TestSummarizeWithoutImages:
         assert summary["num_objects_after"] == 1
         # Image folder is unused; prove the helper never needs it.
         assert not (tmp_path / "no_such_images").exists()
+
+    def test_empty_and_single_box_images(self) -> None:
+        images = {
+            1: {"id": 1, "width": 100, "height": 100},
+            2: {"id": 2, "width": 100, "height": 100},
+        }
+        anns_by_image = {
+            1: [],
+            2: [{"bbox": [10, 10, 20, 20], "category_id": 1, "iscrowd": 0}],
+        }
+        summary = summarize_multilabel_merges(
+            _coco_from_anns(images, anns_by_image),
+            cat2label={1: 0},
+            num_classes=1,
+            iou_threshold=0.99,
+        )
+        assert summary["num_images"] == 2
+        assert summary["num_objects_before"] == 1
+        assert summary["num_objects_after"] == 1
+        assert summary["num_multilabel_objects"] == 0
+        assert summary["combination_counts"] == {}
+
+    def test_parity_with_torch_merge(self) -> None:
+        # Image 1: A-B-C chain (A overlaps B, B overlaps C) plus a same-class pair in the group.
+        # Image 2: random non-overlapping boxes that must not merge.
+        # Image 3: exact duplicate pair of different classes.
+        images = {
+            1: {"id": 1, "width": 200, "height": 200},
+            2: {"id": 2, "width": 200, "height": 200},
+            3: {"id": 3, "width": 200, "height": 200},
+        }
+        anns_by_image = {
+            1: [
+                {"bbox": [10, 10, 40, 40], "category_id": 1, "iscrowd": 0},  # A
+                {"bbox": [10, 10, 40, 40], "category_id": 2, "iscrowd": 0},  # B == A
+                {"bbox": [10, 10, 40, 40], "category_id": 3, "iscrowd": 0},  # C == A/B
+                {"bbox": [10, 10, 40, 40], "category_id": 1, "iscrowd": 0},  # same-class twin of A
+            ],
+            2: [
+                {"bbox": [0, 0, 20, 20], "category_id": 1, "iscrowd": 0},
+                {"bbox": [50, 50, 20, 20], "category_id": 2, "iscrowd": 0},
+                {"bbox": [100, 100, 20, 20], "category_id": 3, "iscrowd": 0},
+            ],
+            3: [
+                {"bbox": [5, 5, 30, 30], "category_id": 1, "iscrowd": 0},
+                {"bbox": [5, 5, 30, 30], "category_id": 2, "iscrowd": 0},
+            ],
+        }
+        cat2label = {1: 0, 2: 1, 3: 2}
+        expected = _summary_via_torch_merge(
+            images,
+            anns_by_image,
+            cat2label=cat2label,
+            num_classes=3,
+            iou_threshold=0.99,
+        )
+        actual = summarize_multilabel_merges(
+            _coco_from_anns(images, anns_by_image),
+            cat2label=cat2label,
+            num_classes=3,
+            iou_threshold=0.99,
+        )
+        assert actual == expected
+        # Chain + same-class twin collapses to one multi-label object with labels {0,1,2}.
+        assert actual["combination_counts"][(0, 1, 2)] >= 1
 
 
 class TestBuildRoboflowYoloRefusal:

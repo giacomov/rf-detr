@@ -10,10 +10,68 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
+import numpy as np
 import torch
 from torch import Tensor
+from tqdm.auto import tqdm
 
 from rfdetr.utilities.box_ops import box_iou
+
+
+def _merge_label_groups(
+    boxes: np.ndarray,
+    labels: np.ndarray,
+    iou_threshold: float,
+) -> list[frozenset[int]] | None:
+    """Group boxes by different-class IoU edges; return ``None`` when nothing merges.
+
+    Uses the same adjacency rule as :func:`merge_multilabel_annotations`: an edge exists
+    when IoU >= ``iou_threshold`` and the two boxes have different labels. Same-class boxes
+    are never joined directly. When there are fewer than two boxes or no edges, returns
+    ``None`` so the caller can treat every box as its own object without allocating groups.
+
+    Args:
+        boxes: Absolute ``[N, 4]`` boxes in ``xyxy``.
+        labels: Integer class ids of shape ``[N]``.
+        iou_threshold: Minimum IoU for two different-class boxes to form an edge.
+
+    Returns:
+        One frozenset of labels per connected component, or ``None`` when no merge edges exist.
+    """
+    n = boxes.shape[0]
+    if n < 2:
+        return None
+    # Pairwise IoU via broadcasting (N is typically small).
+    lt = np.maximum(boxes[:, None, :2], boxes[None, :, :2])
+    rb = np.minimum(boxes[:, None, 2:], boxes[None, :, 2:])
+    wh = np.clip(rb - lt, 0.0, None)
+    inter = wh[..., 0] * wh[..., 1]
+    area = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+    union = area[:, None] + area[None, :] - inter
+    # Avoid divide-by-zero for degenerate boxes (already filtered by callers).
+    with np.errstate(divide="ignore", invalid="ignore"):
+        iou = np.where(union > 0.0, inter / union, 0.0)
+    different = labels[:, None] != labels[None, :]
+    adjacency = (iou >= iou_threshold) & different
+    # Ignore the diagonal; edges are undirected so only the upper triangle is needed.
+    np.fill_diagonal(adjacency, False)
+    if not adjacency.any():
+        return None
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    rows, cols = np.nonzero(np.triu(adjacency, k=1))
+    for i, j in zip(rows.tolist(), cols.tolist()):
+        parent[find(i)] = find(j)
+    groups: dict[int, set[int]] = {}
+    for i in range(n):
+        groups.setdefault(find(i), set()).add(int(labels[i]))
+    return [frozenset(members) for members in groups.values()]
 
 
 def connected_components(adjacency: Tensor) -> Tensor:
@@ -169,35 +227,52 @@ def merge_multilabel_annotations(
     return result
 
 
+def _anns_for_image(coco: Any, image_id: int) -> list[dict[str, Any]]:
+    """Return non-crowd annotations for one image, preferring ``imgToAnns`` when present."""
+    img_to_anns = getattr(coco, "imgToAnns", None)
+    if isinstance(img_to_anns, dict):
+        return [ann for ann in img_to_anns.get(image_id, []) if not ann.get("iscrowd", 0)]
+    ann_ids = coco.getAnnIds(imgIds=[image_id], iscrowd=False)
+    return coco.loadAnns(ann_ids)
+
+
 def summarize_multilabel_merges(
     coco: Any,
     *,
     cat2label: dict[int, int] | None,
     num_classes: int,
     iou_threshold: float,
+    show_progress: bool = False,
 ) -> dict[str, Any]:
     """Run the merge over every image's annotations without reading image files.
+
+    Uses a NumPy IoU / union-find path so the full-dataset startup check stays fast even when
+    PyTorch's CPU thread pool is sized to a large host (common in GPU pods).
 
     Args:
         coco: A pycocotools ``COCO`` API object (``dataset.coco``).
         cat2label: Optional ``category_id`` → contiguous label mapping. ``None`` uses raw
             category ids as labels.
-        num_classes: Width of ``label_sets``.
+        num_classes: Width of ``label_sets`` (unused for counting; kept for API parity).
         iou_threshold: Merge threshold.
+        show_progress: When True, show a tqdm progress bar over images.
 
     Returns:
         Summary dict with ``num_images``, ``num_objects_before``, ``num_objects_after``,
         ``num_multilabel_objects``, and ``combination_counts`` mapping sorted label-id
         tuples to occurrence counts.
     """
+    del num_classes  # API parity with callers; grouping only needs label ids.
     num_objects_before = 0
     num_objects_after = 0
     num_multilabel = 0
     combination_counts: Counter[tuple[int, ...]] = Counter()
     image_ids = list(coco.imgs.keys())
-    for image_id in image_ids:
-        ann_ids = coco.getAnnIds(imgIds=[image_id], iscrowd=False)
-        anns = coco.loadAnns(ann_ids)
+    iterator: Any = image_ids
+    if show_progress:
+        iterator = tqdm(image_ids, desc="multi-label merge summary", unit="img")
+    for image_id in iterator:
+        anns = _anns_for_image(coco, image_id)
         if not anns:
             continue
         info = coco.imgs[image_id]
@@ -223,20 +298,17 @@ def summarize_multilabel_merges(
             box_rows.append([x1, y1, x2, y2])
         if not box_rows:
             continue
-        boxes = torch.tensor(box_rows, dtype=torch.float32)
-        labels = torch.tensor(label_rows, dtype=torch.int64)
+        boxes = np.asarray(box_rows, dtype=np.float64)
+        labels = np.asarray(label_rows, dtype=np.int64)
         num_objects_before += boxes.shape[0]
-        merged = merge_multilabel_annotations(
-            boxes,
-            labels,
-            num_classes=num_classes,
-            iou_threshold=iou_threshold,
-        )
-        label_sets = merged["label_sets"]
-        num_objects_after += label_sets.shape[0]
-        for row in label_sets:
-            positive = tuple(sorted(int(i) for i in row.nonzero(as_tuple=False).flatten().tolist()))
-            if len(positive) > 1:
+        groups = _merge_label_groups(boxes, labels, iou_threshold)
+        if groups is None:
+            num_objects_after += boxes.shape[0]
+            continue
+        num_objects_after += len(groups)
+        for members in groups:
+            if len(members) > 1:
+                positive = tuple(sorted(members))
                 num_multilabel += 1
                 combination_counts[positive] += 1
     return {
